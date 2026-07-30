@@ -148,10 +148,10 @@ async function processJob(job: ConversionJob) {
   }
 }
 
-// Background cleanup worker: runs every 10 minutes to delete output files older than 30 minutes
+// Background cleanup worker: runs every 10 minutes to delete output files older than 3 hours
 setInterval(() => {
   const now = Date.now();
-  const maxAge = 30 * 60 * 1000; // 30 mins
+  const maxAge = 3 * 60 * 60 * 1000; // 3 hours
 
   try {
     const files = readdirSync(DOWNLOADS_DIR);

@@ -9,6 +9,7 @@ const DOWNLOADS_DIR = join(import.meta.dir, "..", "downloads");
 
 const server = Bun.serve({
   port: PORT,
+  idleTimeout: 86400, // 24 hours to prevent slow 2G downloads from timing out
   async fetch(req) {
     const url = new URL(req.url);
     const path = url.pathname;
@@ -74,7 +75,7 @@ const server = Bun.serve({
       if (path.startsWith("/downloads/")) {
         const rawFilename = path.replace("/downloads/", "");
         const filename = decodeURIComponent(rawFilename);
-        
+
         // Prevent directory traversal
         if (filename.includes("..") || filename.includes("/")) {
           return new Response("Access denied", { status: 403 });
