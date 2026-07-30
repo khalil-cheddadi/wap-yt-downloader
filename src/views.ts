@@ -117,7 +117,7 @@ export function renderStatus(job: ConversionJob): string {
       <div class="title">${escapeHtml(job.title)}</div>
       <div class="meta">Format: ${formatName} | Size: ${job.fileSize || "Unknown"}</div>
       <br />
-      <a class="btn btn-green" href="/downloads/${job.filename}" style="font-size: 14px; padding: 6px 12px;">CLICK HERE TO DOWNLOAD FILE</a>
+      <a class="btn btn-green" href="/downloads/${encodeURIComponent(job.filename || "")}" style="font-size: 14px; padding: 6px 12px;">CLICK HERE TO DOWNLOAD FILE</a>
       <br /><br />
       <a href="/" style="font-size: 11px;">Download Another Video</a>
     </div>`;

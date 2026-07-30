@@ -72,7 +72,9 @@ const server = Bun.serve({
 
       // Serve downloaded media files (.3gp / .mp3)
       if (path.startsWith("/downloads/")) {
-        const filename = path.replace("/downloads/", "");
+        const rawFilename = path.replace("/downloads/", "");
+        const filename = decodeURIComponent(rawFilename);
+        
         // Prevent directory traversal
         if (filename.includes("..") || filename.includes("/")) {
           return new Response("Access denied", { status: 403 });
@@ -92,7 +94,7 @@ const server = Bun.serve({
         return new Response(file, {
           headers: {
             "Content-Type": contentType,
-            "Content-Disposition": `attachment; filename="${filename}"`,
+            "Content-Disposition": `attachment; filename="${encodeURIComponent(filename)}"`,
           },
         });
       }

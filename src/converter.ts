@@ -26,6 +26,14 @@ if (!existsSync(TEMP_DIR)) mkdirSync(TEMP_DIR, { recursive: true });
 
 const jobsMap = new Map<string, ConversionJob>();
 
+export function sanitizeFilename(title: string): string {
+  const clean = title
+    .replace(/[/\\?%*:|"<>#]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return clean.length > 0 ? clean : "video";
+}
+
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -60,7 +68,8 @@ export function getJob(id: string): ConversionJob | undefined {
 async function processJob(job: ConversionJob) {
   const tempFile = join(TEMP_DIR, `${job.id}_src.mp4`);
   const ext = job.format === "mp3" ? "mp3" : "3gp";
-  const outputFilename = `${job.id}.${ext}`;
+  const safeTitle = sanitizeFilename(job.title);
+  const outputFilename = `${safeTitle}.${ext}`;
   const outputFile = join(DOWNLOADS_DIR, outputFilename);
 
   try {
