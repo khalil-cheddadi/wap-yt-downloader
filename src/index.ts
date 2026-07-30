@@ -95,7 +95,7 @@ const server = Bun.serve({
         return new Response(file, {
           headers: {
             "Content-Type": contentType,
-            "Content-Disposition": `attachment; filename="${encodeURIComponent(filename)}"`,
+            "Content-Disposition": `attachment; filename="${filename.replace(/"/g, '_')}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
           },
         });
       }
