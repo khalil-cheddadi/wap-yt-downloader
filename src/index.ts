@@ -1,7 +1,7 @@
 import { createJob, getJob, FormatType, getAvailableDownloads, getNextCleanupInfo } from "./converter";
 import { searchYouTube } from "./ytdlp";
 import { renderError, renderHome, renderSearchResults, renderStatus, renderDownloadsList } from "./views";
-import { join } from "path";
+import { join, resolve, relative, isAbsolute } from "path";
 import { existsSync, statSync } from "fs";
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
@@ -88,12 +88,14 @@ const server = Bun.serve({
         }
         const filename = decodeURIComponent(rawFilename);
 
-        // Prevent directory traversal
-        if (filename.includes("..") || filename.includes("/")) {
+        const filePath = resolve(DOWNLOADS_DIR, filename);
+
+        // Prevent directory traversal: verify the path stays within DOWNLOADS_DIR
+        const relPath = relative(DOWNLOADS_DIR, filePath);
+        if (relPath.startsWith("..") || isAbsolute(relPath) || !relPath) {
           return new Response("Access denied", { status: 403 });
         }
 
-        const filePath = join(DOWNLOADS_DIR, filename);
         if (!existsSync(filePath)) {
           return new Response("File not found or expired", { status: 404 });
         }
