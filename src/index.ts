@@ -9,7 +9,7 @@ const DOWNLOADS_DIR = join(import.meta.dir, "..", "downloads");
 
 const server = Bun.serve({
   port: PORT,
-  idleTimeout: 86400, // 24 hours to prevent slow 2G downloads from timing out
+  idleTimeout: 255, // Max allowed by Bun. Data transfer keeps connection alive anyway.
   async fetch(req) {
     const url = new URL(req.url);
     const path = url.pathname;
