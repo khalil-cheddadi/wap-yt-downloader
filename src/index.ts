@@ -1,0 +1,113 @@
+import { createJob, getJob, FormatType } from "./converter";
+import { searchYouTube } from "./ytdlp";
+import { renderError, renderHome, renderSearchResults, renderStatus } from "./views";
+import { join } from "path";
+import { existsSync, statSync } from "fs";
+
+const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
+const DOWNLOADS_DIR = join(import.meta.dir, "..", "downloads");
+
+const server = Bun.serve({
+  port: PORT,
+  async fetch(req) {
+    const url = new URL(req.url);
+    const path = url.pathname;
+
+    try {
+      // Home page
+      if (path === "/") {
+        return new Response(renderHome(), {
+          headers: { "Content-Type": "text/html; charset=utf-8" },
+        });
+      }
+
+      // Search page
+      if (path === "/search") {
+        const query = url.searchParams.get("q")?.trim();
+        if (!query) {
+          return Response.redirect("/", 302);
+        }
+        const results = await searchYouTube(query, 10);
+        return new Response(renderSearchResults(query, results), {
+          headers: { "Content-Type": "text/html; charset=utf-8" },
+        });
+      }
+
+      // Start conversion job
+      if (path === "/convert") {
+        const videoId = url.searchParams.get("id");
+        const title = url.searchParams.get("title") || "YouTube Video";
+        const format = (url.searchParams.get("format") || "mp3") as FormatType;
+
+        if (!videoId) {
+          return new Response(renderError("Invalid video ID."), {
+            headers: { "Content-Type": "text/html; charset=utf-8" },
+          });
+        }
+
+        const job = createJob(videoId, title, format);
+        return Response.redirect(`/status?jobId=${job.id}`, 302);
+      }
+
+      // Status page (Auto-refresh polling)
+      if (path === "/status") {
+        const jobId = url.searchParams.get("jobId");
+        if (!jobId) {
+          return new Response(renderError("Missing job ID."), {
+            headers: { "Content-Type": "text/html; charset=utf-8" },
+          });
+        }
+
+        const job = getJob(jobId);
+        if (!job) {
+          return new Response(renderError("Job not found or expired."), {
+            headers: { "Content-Type": "text/html; charset=utf-8" },
+          });
+        }
+
+        return new Response(renderStatus(job), {
+          headers: { "Content-Type": "text/html; charset=utf-8" },
+        });
+      }
+
+      // Serve downloaded media files (.3gp / .mp3)
+      if (path.startsWith("/downloads/")) {
+        const filename = path.replace("/downloads/", "");
+        // Prevent directory traversal
+        if (filename.includes("..") || filename.includes("/")) {
+          return new Response("Access denied", { status: 403 });
+        }
+
+        const filePath = join(DOWNLOADS_DIR, filename);
+        if (!existsSync(filePath)) {
+          return new Response("File not found or expired", { status: 404 });
+        }
+
+        const file = Bun.file(filePath);
+        const is3gp = filename.endsWith(".3gp");
+        const isMp3 = filename.endsWith(".mp3");
+
+        const contentType = is3gp ? "video/3gpp" : isMp3 ? "audio/mpeg" : "application/octet-stream";
+
+        return new Response(file, {
+          headers: {
+            "Content-Type": contentType,
+            "Content-Disposition": `attachment; filename="${filename}"`,
+          },
+        });
+      }
+
+      return new Response(renderError("Page not found."), {
+        status: 404,
+        headers: { "Content-Type": "text/html; charset=utf-8" },
+      });
+    } catch (err: any) {
+      return new Response(renderError(err.message || "Internal server error"), {
+        status: 500,
+        headers: { "Content-Type": "text/html; charset=utf-8" },
+      });
+    }
+  },
+});
+
+console.log(`[WAP-Net] Server running at http://localhost:${server.port}`);

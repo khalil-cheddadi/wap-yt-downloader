@@ -1,0 +1,20 @@
+# Node & Bun
+node_modules/
+bun.lockb
+.bun/
+
+# Application generated files
+downloads/
+bin/
+
+# Environment & local config
+.env
+.env.local
+.env.*.local
+*.log
+
+# System & IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

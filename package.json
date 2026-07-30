@@ -1,0 +1,14 @@
+{
+  "name": "wap-net",
+  "version": "1.0.0",
+  "description": "WAP YouTube Search & 3GP/MP3 Downloader for feature phones",
+  "module": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch src/index.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}
