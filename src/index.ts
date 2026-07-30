@@ -1,6 +1,6 @@
-import { createJob, getJob, FormatType } from "./converter";
+import { createJob, getJob, FormatType, getAvailableDownloads, getNextCleanupInfo } from "./converter";
 import { searchYouTube } from "./ytdlp";
-import { renderError, renderHome, renderSearchResults, renderStatus } from "./views";
+import { renderError, renderHome, renderSearchResults, renderStatus, renderDownloadsList } from "./views";
 import { join } from "path";
 import { existsSync, statSync } from "fs";
 
@@ -18,6 +18,15 @@ const server = Bun.serve({
       // Home page
       if (path === "/") {
         return new Response(renderHome(), {
+          headers: { "Content-Type": "text/html; charset=utf-8" },
+        });
+      }
+
+      // Available downloads listing page
+      if (path === "/downloads" || path === "/downloads/") {
+        const downloads = getAvailableDownloads();
+        const cleanupInfo = getNextCleanupInfo();
+        return new Response(renderDownloadsList(downloads, cleanupInfo), {
           headers: { "Content-Type": "text/html; charset=utf-8" },
         });
       }
@@ -74,6 +83,9 @@ const server = Bun.serve({
       // Serve downloaded media files (.3gp / .mp3)
       if (path.startsWith("/downloads/")) {
         const rawFilename = path.replace("/downloads/", "");
+        if (!rawFilename) {
+          return Response.redirect("/downloads", 302);
+        }
         const filename = decodeURIComponent(rawFilename);
 
         // Prevent directory traversal

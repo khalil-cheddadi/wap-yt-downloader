@@ -148,29 +148,119 @@ async function processJob(job: ConversionJob) {
   }
 }
 
-// Background cleanup worker: runs every 10 minutes to delete output files older than 3 hours
-setInterval(() => {
+const CLEANUP_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+const MAX_FILE_AGE_MS = 3 * 60 * 60 * 1000; // 3 hours
+
+let nextCleanupTime = Date.now() + CLEANUP_INTERVAL_MS;
+
+export interface NextCleanupInfo {
+  nextCleanupInSeconds: number;
+  nextCleanupFormatted: string;
+  maxAgeHours: number;
+}
+
+export interface DownloadedFileItem {
+  filename: string;
+  size: string;
+  sizeBytes: number;
+  createdAtMs: number;
+  expiresInSeconds: number;
+  expiresInFormatted: string;
+  formatLabel: string;
+}
+
+export function formatDurationSeconds(seconds: number): string {
+  if (seconds <= 0) return "imminent";
+  const hours = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+
+  const parts: string[] = [];
+  if (hours > 0) parts.push(`${hours}h`);
+  if (mins > 0 || hours > 0) parts.push(`${mins}m`);
+  parts.push(`${secs}s`);
+  return parts.join(" ");
+}
+
+export function runCleanup() {
   const now = Date.now();
-  const maxAge = 3 * 60 * 60 * 1000; // 3 hours
+  nextCleanupTime = now + CLEANUP_INTERVAL_MS;
 
   try {
     const files = readdirSync(DOWNLOADS_DIR);
     for (const f of files) {
-      if (f === "temp") continue;
+      if (f === "temp" || f.startsWith(".")) continue;
       const path = join(DOWNLOADS_DIR, f);
       const stat = statSync(path);
-      if (now - stat.mtimeMs > maxAge) {
+      if (now - stat.mtimeMs > MAX_FILE_AGE_MS) {
         unlinkSync(path);
       }
     }
 
     // Clean up old jobs from memory
     for (const [id, job] of jobsMap.entries()) {
-      if (now - job.createdAt > maxAge) {
+      if (now - job.createdAt > MAX_FILE_AGE_MS) {
         jobsMap.delete(id);
       }
     }
   } catch {
     // Ignore cleanup errors
   }
-}, 10 * 60 * 1000);
+}
+
+// Background cleanup worker
+setInterval(runCleanup, CLEANUP_INTERVAL_MS);
+
+export function getNextCleanupInfo(): NextCleanupInfo {
+  const now = Date.now();
+  const diffMs = nextCleanupTime - now;
+  const nextCleanupInSeconds = Math.max(0, Math.ceil(diffMs / 1000));
+  return {
+    nextCleanupInSeconds,
+    nextCleanupFormatted: formatDurationSeconds(nextCleanupInSeconds),
+    maxAgeHours: 3,
+  };
+}
+
+export function getAvailableDownloads(): DownloadedFileItem[] {
+  const now = Date.now();
+  const result: DownloadedFileItem[] = [];
+
+  if (!existsSync(DOWNLOADS_DIR)) return result;
+
+  try {
+    const files = readdirSync(DOWNLOADS_DIR);
+    for (const f of files) {
+      if (f === "temp" || f.startsWith(".")) continue;
+      const filePath = join(DOWNLOADS_DIR, f);
+      const stat = statSync(filePath);
+      if (stat.isDirectory()) continue;
+
+      const ageMs = now - stat.mtimeMs;
+      const expiresInSeconds = Math.max(0, Math.ceil((MAX_FILE_AGE_MS - ageMs) / 1000));
+
+      let formatLabel = "File";
+      if (f.endsWith(".mp3")) {
+        formatLabel = "MP3 Audio";
+      } else if (f.endsWith(".3gp")) {
+        formatLabel = "3GP Video";
+      }
+
+      result.push({
+        filename: f,
+        size: formatFileSize(stat.size),
+        sizeBytes: stat.size,
+        createdAtMs: stat.mtimeMs,
+        expiresInSeconds,
+        expiresInFormatted: formatDurationSeconds(expiresInSeconds),
+        formatLabel,
+      });
+    }
+  } catch {
+    // Ignore read errors
+  }
+
+  // Sort by newest first
+  return result.sort((a, b) => b.createdAtMs - a.createdAtMs);
+}
+

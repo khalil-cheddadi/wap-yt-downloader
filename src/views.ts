@@ -1,4 +1,4 @@
-import { ConversionJob } from "./converter";
+import { ConversionJob, DownloadedFileItem, NextCleanupInfo } from "./converter";
 import { YouTubeSearchResult } from "./ytdlp";
 
 function escapeHtml(str: string): string {
@@ -23,7 +23,7 @@ export function renderLayout(title: string, bodyContent: string, metaExtra = "")
     .header { background-color: #cc0000; color: #fff; padding: 6px; font-weight: bold; text-align: center; }
     .header a { color: #fff; text-decoration: none; }
     .box { background-color: #fff; border: 1px solid #ccc; margin-top: 6px; padding: 6px; }
-    .title { font-weight: bold; color: #000; }
+    .title { font-weight: bold; color: #000; word-break: break-all; }
     .meta { color: #555; font-size: 11px; margin-top: 2px; }
     .btn { display: inline-block; background-color: #0066cc; color: #ffffff; padding: 4px 8px; text-decoration: none; font-weight: bold; margin-top: 4px; border-radius: 3px; font-size: 12px; }
     .btn-green { background-color: #008800; }
@@ -34,7 +34,7 @@ export function renderLayout(title: string, bodyContent: string, metaExtra = "")
 </head>
 <body>
   <div class="header">
-    <a href="/">WAP TUBE DOWNLOADER</a>
+    <a href="/">WAP TUBE</a> &bull; <a href="/downloads">DOWNLOADS</a>
   </div>
   ${bodyContent}
   <div class="footer">
@@ -53,6 +53,9 @@ export function renderHome(): string {
       <input type="submit" value="Search" style="padding: 4px 10px; font-weight: bold;" />
     </form>
   </div>
+  <div class="box" style="text-align: center;">
+    <a class="btn btn-green" href="/downloads">View Available Downloads</a>
+  </div>
   <div class="box">
     <b>Features:</b>
     <ul style="margin: 4px 0; padding-left: 18px;">
@@ -63,6 +66,46 @@ export function renderHome(): string {
   </div>`;
   return renderLayout("Home", content);
 }
+
+export function renderDownloadsList(files: DownloadedFileItem[], cleanupInfo: NextCleanupInfo): string {
+  let listHtml = "";
+
+  if (files.length === 0) {
+    listHtml = `
+    <div class="box" style="text-align: center;">
+      <p>No converted files are currently available for download.</p>
+      <a class="btn btn-green" href="/">Search & Convert Videos</a>
+    </div>`;
+  } else {
+    listHtml = files.map((file, idx) => `
+    <div class="box">
+      <div class="title">${idx + 1}. ${escapeHtml(file.filename)}</div>
+      <div class="meta">Format: <b>${escapeHtml(file.formatLabel)}</b> | Size: <b>${file.size}</b></div>
+      <div class="meta" style="color: #d96b00;">Expires in: <b>${file.expiresInFormatted}</b></div>
+      <hr />
+      <a class="btn btn-green" href="/downloads/${encodeURIComponent(file.filename)}">Download File</a>
+    </div>
+    `).join("");
+  }
+
+  const content = `
+  <div class="box" style="background-color: #fff8e7; border-color: #ffe0b2;">
+    <b style="color: #d96b00;">Cleanup Notice:</b><br />
+    Next cleanup sweep in <b>${cleanupInfo.nextCleanupFormatted}</b>.<br />
+    <span class="meta">Files are kept for up to ${cleanupInfo.maxAgeHours} hours after creation.</span>
+  </div>
+  <div class="box" style="background-color: #eee;">
+    <b>Available Downloads:</b> ${files.length} file(s)
+    | <a href="/downloads">Refresh List</a>
+  </div>
+  ${listHtml}
+  <div class="box" style="text-align: center;">
+    <a href="/">Back to Search</a>
+  </div>`;
+
+  return renderLayout("Available Downloads", content);
+}
+
 
 export function renderSearchResults(query: string, results: YouTubeSearchResult[]): string {
   let listHtml = "";
