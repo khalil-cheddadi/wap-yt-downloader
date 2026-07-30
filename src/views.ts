@@ -15,30 +15,19 @@ export function renderLayout(title: string, bodyContent: string, metaExtra = "")
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
   <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   ${metaExtra}
   <title>${escapeHtml(title)} - WAP Tube</title>
-  <style type="text/css">
-    body { font-family: sans-serif; background-color: #f7f7f7; color: #111; margin: 4px; padding: 0; font-size: 13px; }
-    .header { background-color: #cc0000; color: #fff; padding: 6px; font-weight: bold; text-align: center; }
-    .header a { color: #fff; text-decoration: none; }
-    .box { background-color: #fff; border: 1px solid #ccc; margin-top: 6px; padding: 6px; }
-    .title { font-weight: bold; color: #000; word-break: break-all; }
-    .meta { color: #555; font-size: 11px; margin-top: 2px; }
-    .btn { display: inline-block; background-color: #0066cc; color: #ffffff; padding: 4px 8px; text-decoration: none; font-weight: bold; margin-top: 4px; border-radius: 3px; font-size: 12px; }
-    .btn-green { background-color: #008800; }
-    .btn-orange { background-color: #d96b00; }
-    .footer { text-align: center; margin-top: 10px; font-size: 10px; color: #666; border-top: 1px solid #ccc; padding-top: 6px; }
-    hr { border: 0; height: 1px; background-color: #ddd; margin: 6px 0; }
-  </style>
 </head>
 <body>
-  <div class="header">
-    <a href="/">WAP TUBE</a> &bull; <a href="/downloads">DOWNLOADS</a>
+  <div align="center">
+    <strong><a href="/">WAP TUBE</a></strong> | <strong><a href="/downloads">MY DOWNLOADS</a></strong>
   </div>
+  <hr />
   ${bodyContent}
-  <div class="footer">
-    WAP-Net &bull; Optimized for Feature Phones
+  <hr />
+  <div align="center">
+    <small>WAP-Net &bull; Feature Phone Downloader</small>
   </div>
 </body>
 </html>`;
@@ -46,24 +35,30 @@ export function renderLayout(title: string, bodyContent: string, metaExtra = "")
 
 export function renderHome(): string {
   const content = `
-  <div class="box">
+  <fieldset>
+    <legend><strong>YouTube Search</strong></legend>
     <form action="/search" method="get">
-      <b>Search YouTube:</b><br />
-      <input type="text" name="q" size="18" style="width: 90%; margin: 4px 0;" /><br />
-      <input type="submit" value="Search" style="padding: 4px 10px; font-weight: bold;" />
+      <p>
+        <label for="q"><strong>Search Query:</strong></label><br />
+        <input type="text" id="q" name="q" size="20" /><br /><br />
+        <input type="submit" value="[ Search YouTube ]" />
+      </p>
     </form>
-  </div>
-  <div class="box" style="text-align: center;">
-    <a class="btn btn-green" href="/downloads">View Available Downloads</a>
-  </div>
-  <div class="box">
-    <b>Features:</b>
-    <ul style="margin: 4px 0; padding-left: 18px;">
-      <li>Audio: <b>MP3</b> (128k)</li>
-      <li>Video: <b>3GP</b> (176x144 QCIF for 2G phones)</li>
-      <li>Video: <b>3GP</b> (320x240 QVGA)</li>
+  </fieldset>
+
+  <p align="center">
+    <a href="/downloads"><strong>[ View Available Downloads ]</strong></a>
+  </p>
+
+  <fieldset>
+    <legend><strong>Supported Formats</strong></legend>
+    <ul>
+      <li><strong>Audio:</strong> MP3 (128 kbps)</li>
+      <li><strong>2G Video:</strong> 3GP (176x144 QCIF)</li>
+      <li><strong>Mobile Video:</strong> 3GP (320x240 QVGA)</li>
     </ul>
-  </div>`;
+  </fieldset>`;
+
   return renderLayout("Home", content);
 }
 
@@ -72,69 +67,79 @@ export function renderDownloadsList(files: DownloadedFileItem[], cleanupInfo: Ne
 
   if (files.length === 0) {
     listHtml = `
-    <div class="box" style="text-align: center;">
-      <p>No converted files are currently available for download.</p>
-      <a class="btn btn-green" href="/">Search & Convert Videos</a>
-    </div>`;
+    <p align="center">
+      <em>No converted files available for download.</em><br /><br />
+      <a href="/"><strong>[ Search &amp; Convert Videos ]</strong></a>
+    </p>`;
   } else {
     listHtml = files.map((file, idx) => `
-    <div class="box">
-      <div class="title">${idx + 1}. ${escapeHtml(file.filename)}</div>
-      <div class="meta">Format: <b>${escapeHtml(file.formatLabel)}</b> | Size: <b>${file.size}</b></div>
-      <div class="meta" style="color: #d96b00;">Expires in: <b>${file.expiresInFormatted}</b></div>
-      <hr />
-      <a class="btn btn-green" href="/downloads/${encodeURIComponent(file.filename)}">Download File</a>
-    </div>
+    <fieldset>
+      <legend><strong>File #${idx + 1}</strong></legend>
+      <p>
+        <strong>${escapeHtml(file.filename)}</strong><br />
+        &bull; Format: <strong>${escapeHtml(file.formatLabel)}</strong><br />
+        &bull; Size: <strong>${file.size}</strong><br />
+        &bull; Expires in: <strong>${file.expiresInFormatted}</strong><br /><br />
+        <a href="/downloads/${encodeURIComponent(file.filename)}"><strong>[ DOWNLOAD FILE ]</strong></a>
+      </p>
+    </fieldset>
     `).join("");
   }
 
   const content = `
-  <div class="box" style="background-color: #fff8e7; border-color: #ffe0b2;">
-    <b style="color: #d96b00;">Cleanup Notice:</b><br />
-    Next cleanup sweep in <b>${cleanupInfo.nextCleanupFormatted}</b>.<br />
-    <span class="meta">Files are kept for up to ${cleanupInfo.maxAgeHours} hours after creation.</span>
-  </div>
-  <div class="box" style="background-color: #eee;">
-    <b>Available Downloads:</b> ${files.length} file(s)
-    | <a href="/downloads">Refresh List</a>
-  </div>
+  <fieldset>
+    <legend><strong>Cleanup Status</strong></legend>
+    <p>
+      Next auto-cleanup sweep: <strong>${cleanupInfo.nextCleanupFormatted}</strong><br />
+      <small>(Files expire ${cleanupInfo.maxAgeHours} hours after conversion)</small>
+    </p>
+  </fieldset>
+
+  <p align="right">
+    <a href="/downloads">[ Refresh List ]</a> | <a href="/">[ New Search ]</a>
+  </p>
+
   ${listHtml}
-  <div class="box" style="text-align: center;">
-    <a href="/">Back to Search</a>
-  </div>`;
+
+  <p align="center">
+    <a href="/"><strong>[ Back to Search Home ]</strong></a>
+  </p>`;
 
   return renderLayout("Available Downloads", content);
 }
-
 
 export function renderSearchResults(query: string, results: YouTubeSearchResult[]): string {
   let listHtml = "";
 
   if (results.length === 0) {
-    listHtml = `<div class="box">No videos found for "<b>${escapeHtml(query)}</b>". Try another query.</div>`;
+    listHtml = `<p>No videos found for "<strong>${escapeHtml(query)}</strong>". Please try another search.</p>`;
   } else {
     listHtml = results.map((item, idx) => `
-    <div class="box">
-      <div class="title">${idx + 1}. ${escapeHtml(item.title)}</div>
-      <div class="meta">Channel: ${escapeHtml(item.channel)} | Duration: ${escapeHtml(item.duration)}</div>
-      <hr />
-      <b>Download As:</b><br />
-      <a class="btn btn-green" href="/convert?id=${escapeHtml(item.id)}&title=${encodeURIComponent(item.title)}&format=mp3">MP3 Audio</a>
-      <a class="btn" href="/convert?id=${escapeHtml(item.id)}&title=${encodeURIComponent(item.title)}&format=3gp_qcif">3GP (176x144)</a>
-      <a class="btn btn-orange" href="/convert?id=${escapeHtml(item.id)}&title=${encodeURIComponent(item.title)}&format=3gp_qvga">3GP (320x240)</a>
-    </div>
+    <fieldset>
+      <legend><strong>Result #${idx + 1}</strong></legend>
+      <p>
+        <strong>${escapeHtml(item.title)}</strong><br />
+        <small>Channel: ${escapeHtml(item.channel)} | Duration: ${escapeHtml(item.duration)}</small><br /><br />
+        <strong>Download Options:</strong><br />
+        &bull; <a href="/convert?id=${escapeHtml(item.id)}&title=${encodeURIComponent(item.title)}&format=mp3"><strong>[ MP3 Audio ]</strong></a><br />
+        &bull; <a href="/convert?id=${escapeHtml(item.id)}&title=${encodeURIComponent(item.title)}&format=3gp_qcif"><strong>[ 3GP 176x144 (2G) ]</strong></a><br />
+        &bull; <a href="/convert?id=${escapeHtml(item.id)}&title=${encodeURIComponent(item.title)}&format=3gp_qvga"><strong>[ 3GP 320x240 ]</strong></a>
+      </p>
+    </fieldset>
     `).join("");
   }
 
   const content = `
-  <div class="box" style="background-color: #eee;">
-    Search: <b>${escapeHtml(query)}</b> (${results.length} results)
-    | <a href="/">New Search</a>
-  </div>
+  <fieldset>
+    <legend><strong>Search Results</strong></legend>
+    <p>Query: <strong>"${escapeHtml(query)}"</strong> (${results.length} found) | <a href="/">[ New Search ]</a></p>
+  </fieldset>
+
   ${listHtml}
-  <div class="box" style="text-align: center;">
-    <a href="/">Search Again</a>
-  </div>`;
+
+  <p align="center">
+    <a href="/"><strong>[ Search Again ]</strong></a>
+  </p>`;
 
   return renderLayout(`Results for ${query}`, content);
 }
@@ -145,38 +150,47 @@ export function renderStatus(job: ConversionJob): string {
 
   if (job.status === "pending" || job.status === "downloading" || job.status === "converting") {
     metaRefresh = `<meta http-equiv="refresh" content="5;url=/status?jobId=${job.id}" />`;
-    const statusText = job.status === "downloading" ? "Downloading YouTube video..." : "Converting to requested format...";
+    const statusText = job.status === "downloading" ? "Downloading YouTube video..." : "Converting video format...";
     statusBox = `
-    <div class="box" style="text-align: center;">
-      <b style="color: #0066cc;">Status: ${statusText}</b><br />
-      <p class="meta">Please wait... This page refreshes automatically every 5 seconds.</p>
-      <a class="btn" href="/status?jobId=${job.id}">Manual Refresh</a>
-    </div>`;
+    <fieldset>
+      <legend><strong>Progress Status</strong></legend>
+      <p align="center">
+        <strong>STATUS: ${statusText}</strong><br /><br />
+        <small>Please wait... Page refreshes automatically every 5 seconds.</small><br /><br />
+        <a href="/status?jobId=${job.id}"><strong>[ Manual Refresh ]</strong></a>
+      </p>
+    </fieldset>`;
   } else if (job.status === "completed") {
     const formatName = job.format === "mp3" ? "MP3 Audio" : job.format === "3gp_qcif" ? "3GP Video (176x144)" : "3GP Video (320x240)";
     statusBox = `
-    <div class="box" style="text-align: center; border-color: #008800;">
-      <b style="color: #008800;">Conversion Complete!</b><br /><br />
-      <div class="title">${escapeHtml(job.title)}</div>
-      <div class="meta">Format: ${formatName} | Size: ${job.fileSize || "Unknown"}</div>
-      <br />
-      <a class="btn btn-green" href="/downloads/${encodeURIComponent(job.filename || "")}" style="font-size: 14px; padding: 6px 12px;">CLICK HERE TO DOWNLOAD FILE</a>
-      <br /><br />
-      <a href="/" style="font-size: 11px;">Download Another Video</a>
-    </div>`;
+    <fieldset>
+      <legend><strong>Conversion Complete!</strong></legend>
+      <p align="center">
+        <strong>Format:</strong> ${formatName}<br />
+        <strong>File Size:</strong> ${job.fileSize || "Unknown"}<br /><br />
+        <a href="/downloads/${encodeURIComponent(job.filename || "")}"><strong>[ CLICK HERE TO DOWNLOAD FILE ]</strong></a>
+      </p>
+    </fieldset>
+    <p align="center">
+      <a href="/">[ Download Another Video ]</a> | <a href="/downloads">[ View Downloads ]</a>
+    </p>`;
   } else {
     statusBox = `
-    <div class="box" style="border-color: #cc0000;">
-      <b style="color: #cc0000;">Conversion Error</b><br />
-      <p style="color: #666; font-size: 12px;">${escapeHtml(job.error || "An error occurred while processing the video.")}</p>
-      <a class="btn" href="/">Try Again</a>
-    </div>`;
+    <fieldset>
+      <legend><strong>Conversion Error</strong></legend>
+      <p>
+        <strong>Error Details:</strong><br />
+        <small>${escapeHtml(job.error || "An error occurred while processing the video.")}</small><br /><br />
+        <a href="/"><strong>[ Try Again ]</strong></a>
+      </p>
+    </fieldset>`;
   }
 
   const content = `
-  <div class="box">
-    <b>Video:</b> ${escapeHtml(job.title)}
-  </div>
+  <fieldset>
+    <legend><strong>Video Title</strong></legend>
+    <p><strong>${escapeHtml(job.title)}</strong></p>
+  </fieldset>
   ${statusBox}`;
 
   return renderLayout(`Processing - ${job.title}`, content, metaRefresh);
@@ -184,10 +198,12 @@ export function renderStatus(job: ConversionJob): string {
 
 export function renderError(message: string): string {
   const content = `
-  <div class="box" style="border-color: #cc0000;">
-    <b style="color: #cc0000;">Error</b><br />
-    <p>${escapeHtml(message)}</p>
-    <a class="btn" href="/">Back to Home</a>
-  </div>`;
+  <fieldset>
+    <legend><strong>Error Notice</strong></legend>
+    <p><strong>Message:</strong> ${escapeHtml(message)}</p>
+    <p align="center"><a href="/"><strong>[ Return to Home ]</strong></a></p>
+  </fieldset>`;
+
   return renderLayout("Error", content);
 }
+
