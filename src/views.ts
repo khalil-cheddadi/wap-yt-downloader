@@ -1,4 +1,4 @@
-import { ConversionJob, DownloadedFileItem, NextCleanupInfo, PaginatedDownloads } from "./converter";
+import { ConversionJob, DownloadedFileItem, NextCleanupInfo, PaginatedDownloads, estimateSize, getFormatLabel } from "./converter";
 import { YouTubeSearchResult, PaginatedSearchResults } from "./ytdlp";
 
 function escapeHtml(str: string): string {
@@ -34,7 +34,7 @@ export function renderLayout(title: string, bodyContent: string, metaExtra = "")
 </html>`;
 }
 
-export function renderHome(): string {
+export function renderHome(showThumbnails = false): string {
   const content = `
   <fieldset>
     <legend><strong>YouTube Search</strong></legend>
@@ -43,6 +43,7 @@ export function renderHome(): string {
         <label for="q"><strong>Search Query:</strong></label><br />
         <input type="text" id="q" name="q" size="20" accesskey="3" /><br />
         <small>(Accesskey 3: Focus Search Box)</small><br /><br />
+        <label><input type="checkbox" name="thumbs" value="1" ${showThumbnails ? 'checked="checked"' : ""} /> Show thumbnails</label><br /><br />
         <input type="submit" value="[ Search YouTube ]" />
       </p>
     </form>
@@ -55,9 +56,8 @@ export function renderHome(): string {
   <fieldset>
     <legend><strong>Supported Formats</strong></legend>
     <ul>
-      <li><strong>Audio:</strong> MP3 (128 kbps)</li>
-      <li><strong>2G Video:</strong> 3GP (176x144 QCIF)</li>
-      <li><strong>Mobile Video:</strong> 3GP (320x240 QVGA)</li>
+      <li><strong>Audio:</strong> MP3 Low (128k), MP3 High (320k)</li>
+      <li><strong>Video:</strong> 3GP Low (176x144 QCIF), 3GP High (320x240 QVGA)</li>
     </ul>
   </fieldset>`;
 
@@ -135,7 +135,7 @@ export function renderDownloadsList(paginatedDownloads: PaginatedDownloads, clea
   return renderLayout("Available Downloads", content);
 }
 
-export function renderSearchResults(query: string, searchData: PaginatedSearchResults): string {
+export function renderSearchResults(query: string, searchData: PaginatedSearchResults, showThumbnails = false): string {
   const { results, page, hasNextPage } = searchData;
   let listHtml = "";
 
@@ -144,27 +144,40 @@ export function renderSearchResults(query: string, searchData: PaginatedSearchRe
   } else {
     listHtml = results.map((item, idx) => {
       const itemNum = (page - 1) * searchData.pageSize + idx + 1;
+      const thumbHtml = showThumbnails && item.thumbnailUrl
+        ? `<p align="center"><img src="${escapeHtml(item.thumbnailUrl)}" alt="${escapeHtml(item.title)}" width="120" style="max-width:100%; height:auto;" /></p>`
+        : "";
       return `
     <fieldset>
       <legend><strong>Result #${itemNum}</strong></legend>
+      ${thumbHtml}
       <p>
         <strong>${escapeHtml(item.title)}</strong><br />
         <small>Channel: ${escapeHtml(item.channel)} | Duration: ${escapeHtml(item.duration)}</small><br /><br />
         <strong>Download Options:</strong><br />
-        &bull; <a href="/convert?id=${escapeHtml(item.id)}&title=${encodeURIComponent(item.title)}&format=mp3"><strong>[ MP3 Audio ]</strong></a><br />
-        &bull; <a href="/convert?id=${escapeHtml(item.id)}&title=${encodeURIComponent(item.title)}&format=3gp_qcif"><strong>[ 3GP 176x144 (2G) ]</strong></a><br />
-        &bull; <a href="/convert?id=${escapeHtml(item.id)}&title=${encodeURIComponent(item.title)}&format=3gp_qvga"><strong>[ 3GP 320x240 ]</strong></a>
+        &bull; <a href="/convert?id=${escapeHtml(item.id)}&title=${encodeURIComponent(item.title)}&format=mp3_low"><strong>[ MP3 Low 128k (${estimateSize(item.durationSeconds, "mp3_low")}) ]</strong></a><br />
+        &bull; <a href="/convert?id=${escapeHtml(item.id)}&title=${encodeURIComponent(item.title)}&format=mp3_high"><strong>[ MP3 High 320k (${estimateSize(item.durationSeconds, "mp3_high")}) ]</strong></a><br />
+        &bull; <a href="/convert?id=${escapeHtml(item.id)}&title=${encodeURIComponent(item.title)}&format=3gp_low"><strong>[ 3GP Low 176x144 (${estimateSize(item.durationSeconds, "3gp_low")}) ]</strong></a><br />
+        &bull; <a href="/convert?id=${escapeHtml(item.id)}&title=${encodeURIComponent(item.title)}&format=3gp_high"><strong>[ 3GP High 320x240 (${estimateSize(item.durationSeconds, "3gp_high")}) ]</strong></a>
       </p>
     </fieldset>`;
     }).join("");
   }
 
-  const paginationBar = renderPaginationBar(`/search?q=${encodeURIComponent(query)}`, page, null, hasNextPage);
+  const thumbsParamVal = showThumbnails ? "1" : "0";
+  const toggleUrl = `/search?q=${encodeURIComponent(query)}&amp;page=${page}&amp;thumbs=${showThumbnails ? "0" : "1"}`;
+  const toggleText = showThumbnails ? "[ Hide Thumbnails ]" : "[ Show Thumbnails ]";
+
+  const baseUrl = `/search?q=${encodeURIComponent(query)}&amp;thumbs=${thumbsParamVal}`;
+  const paginationBar = renderPaginationBar(baseUrl, page, null, hasNextPage);
 
   const content = `
   <fieldset>
     <legend><strong>Search Results</strong></legend>
-    <p>Query: <strong>"${escapeHtml(query)}"</strong> | <a href="/" accesskey="1">[1] New Search</a></p>
+    <p>
+      Query: <strong>"${escapeHtml(query)}"</strong> | <a href="/" accesskey="1">[1] New Search</a><br />
+      Thumbnails: <a href="${toggleUrl}"><strong>${toggleText}</strong></a>
+    </p>
   </fieldset>
 
   ${results.length > 0 ? paginationBar + "<br />" : ""}
@@ -195,12 +208,12 @@ export function renderStatus(job: ConversionJob): string {
       </p>
     </fieldset>`;
   } else if (job.status === "completed") {
-    const formatName = job.format === "mp3" ? "MP3 Audio" : job.format === "3gp_qcif" ? "3GP Video (176x144)" : "3GP Video (320x240)";
+    const formatName = getFormatLabel(job.format);
     statusBox = `
     <fieldset>
       <legend><strong>Conversion Complete!</strong></legend>
       <p align="center">
-        <strong>Format:</strong> ${formatName}<br />
+        <strong>Format:</strong> ${escapeHtml(formatName)}<br />
         <strong>File Size:</strong> ${job.fileSize || "Unknown"}<br /><br />
         <a href="/downloads/${encodeURIComponent(job.filename || "")}"><strong>[ CLICK HERE TO DOWNLOAD FILE ]</strong></a>
       </p>

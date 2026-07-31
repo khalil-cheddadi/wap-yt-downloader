@@ -9,6 +9,7 @@ export interface YouTubeSearchResult {
   duration: string;
   durationSeconds: number;
   channel: string;
+  thumbnailUrl: string;
 }
 
 const BIN_DIR = join(import.meta.dir, "..", "bin");
@@ -58,12 +59,23 @@ export async function searchYouTube(query: string, page = 1, pageSize = 5, reqId
     try {
       const data = JSON.parse(line);
       if (data && data.id) {
+        let thumbUrl = `https://i.ytimg.com/vi/${data.id}/default.jpg`;
+        if (typeof data.thumbnail === "string" && data.thumbnail) {
+          thumbUrl = data.thumbnail;
+        } else if (Array.isArray(data.thumbnails) && data.thumbnails.length > 0) {
+          const t = data.thumbnails[0];
+          if (t && typeof t.url === "string") {
+            thumbUrl = t.url;
+          }
+        }
+
         allResults.push({
           id: data.id,
           title: data.title || "Untitled Video",
           durationSeconds: data.duration || 0,
           duration: formatDuration(data.duration),
           channel: data.uploader || data.channel || "Unknown Channel",
+          thumbnailUrl: thumbUrl,
         });
       }
     } catch {

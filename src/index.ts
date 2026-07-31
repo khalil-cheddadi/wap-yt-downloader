@@ -39,6 +39,16 @@ const server = Bun.serve({
 
 logger.info("SERVER", `Server running at http://localhost:${server.port}`);
 
+function parseCookie(cookieHeader: string | null, name: string): string | null {
+  if (!cookieHeader) return null;
+  const cookies = cookieHeader.split(";");
+  for (const cookie of cookies) {
+    const [k, v] = cookie.trim().split("=");
+    if (k === name) return v ? decodeURIComponent(v) : "";
+  }
+  return null;
+}
+
 async function handleRoute(req: Request, url: URL, path: string, reqId: string): Promise<Response> {
   // Serve favicon
   if (path === "/favicon.ico") {
@@ -53,9 +63,23 @@ async function handleRoute(req: Request, url: URL, path: string, reqId: string):
 
   // Home page
   if (path === "/") {
-    return new Response(renderHome(), {
-      headers: { "Content-Type": "text/html; charset=utf-8" },
-    });
+    const thumbsParam = url.searchParams.get("thumbs");
+    const cookieHeader = req.headers.get("cookie");
+    const cookieThumbs = parseCookie(cookieHeader, "wap_thumbs");
+    let showThumbnails = false;
+
+    if (thumbsParam !== null) {
+      showThumbnails = thumbsParam === "1";
+    } else if (cookieThumbs !== null) {
+      showThumbnails = cookieThumbs === "1";
+    }
+
+    const headers: Record<string, string> = { "Content-Type": "text/html; charset=utf-8" };
+    if (thumbsParam !== null) {
+      headers["Set-Cookie"] = `wap_thumbs=${showThumbnails ? "1" : "0"}; Path=/; Max-Age=31536000`;
+    }
+
+    return new Response(renderHome(showThumbnails), { headers });
   }
 
   // Available downloads listing page
@@ -75,12 +99,27 @@ async function handleRoute(req: Request, url: URL, path: string, reqId: string):
     if (!query) {
       return Response.redirect("/", 302);
     }
+    const thumbsParam = url.searchParams.get("thumbs");
+    const cookieHeader = req.headers.get("cookie");
+    const cookieThumbs = parseCookie(cookieHeader, "wap_thumbs");
+
+    let showThumbnails = false;
+    if (thumbsParam !== null) {
+      showThumbnails = thumbsParam === "1";
+    } else if (cookieThumbs !== null) {
+      showThumbnails = cookieThumbs === "1";
+    }
+
     const pageParam = url.searchParams.get("page");
     const page = Math.max(1, parseInt(pageParam || "1") || 1);
     const searchData = await searchYouTube(query, page, 5, reqId);
-    return new Response(renderSearchResults(query, searchData), {
-      headers: { "Content-Type": "text/html; charset=utf-8" },
-    });
+
+    const headers: Record<string, string> = { "Content-Type": "text/html; charset=utf-8" };
+    if (thumbsParam !== null) {
+      headers["Set-Cookie"] = `wap_thumbs=${showThumbnails ? "1" : "0"}; Path=/; Max-Age=31536000`;
+    }
+
+    return new Response(renderSearchResults(query, searchData, showThumbnails), { headers });
   }
 
   // Start conversion job

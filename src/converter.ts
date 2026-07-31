@@ -4,7 +4,7 @@ import { join } from "path";
 import { downloadSourceVideo } from "./ytdlp";
 import { logger } from "./logger";
 
-export type FormatType = "mp3" | "3gp_qcif" | "3gp_qvga";
+export type FormatType = "mp3" | "mp3_low" | "mp3_high" | "3gp_qcif" | "3gp_qvga" | "3gp_low" | "3gp_high";
 
 export interface ConversionJob {
   id: string;
@@ -35,10 +35,44 @@ export function sanitizeFilename(title: string): string {
   return clean.length > 0 ? clean : "video";
 }
 
-function formatFileSize(bytes: number): string {
+export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+export function estimateSize(durationSeconds: number, format: FormatType): string {
+  if (!durationSeconds || durationSeconds <= 0) return "Unknown";
+  let bytesPerSec = 0;
+  if (format === "mp3" || format === "mp3_low") {
+    bytesPerSec = (128 * 1000) / 8;
+  } else if (format === "mp3_high") {
+    bytesPerSec = (320 * 1000) / 8;
+  } else if (format === "3gp_qcif" || format === "3gp_low") {
+    bytesPerSec = ((128 + 12.2) * 1000) / 8;
+  } else if (format === "3gp_qvga" || format === "3gp_high") {
+    bytesPerSec = ((256 + 48) * 1000) / 8;
+  }
+  const totalBytes = Math.round(durationSeconds * bytesPerSec);
+  return `~${formatFileSize(totalBytes)}`;
+}
+
+export function getFormatLabel(format: FormatType): string {
+  switch (format) {
+    case "mp3":
+    case "mp3_low":
+      return "MP3 Low (128k)";
+    case "mp3_high":
+      return "MP3 High (320k)";
+    case "3gp_qcif":
+    case "3gp_low":
+      return "3GP Low (176x144)";
+    case "3gp_qvga":
+    case "3gp_high":
+      return "3GP High (320x240)";
+    default:
+      return format;
+  }
 }
 
 export function createJob(videoId: string, title: string, format: FormatType): ConversionJob {
@@ -72,7 +106,8 @@ export function getJob(id: string): ConversionJob | undefined {
 
 async function processJob(job: ConversionJob, jobLogId: string) {
   const tempFile = join(TEMP_DIR, `${job.id}_src.mp4`);
-  const ext = job.format === "mp3" ? "mp3" : "3gp";
+  const isMp3 = job.format === "mp3" || job.format === "mp3_low" || job.format === "mp3_high";
+  const ext = isMp3 ? "mp3" : "3gp";
   const safeTitle = sanitizeFilename(job.title);
   const outputFilename = `${safeTitle}.${ext}`;
   const outputFile = join(DOWNLOADS_DIR, outputFilename);
@@ -90,7 +125,7 @@ async function processJob(job: ConversionJob, jobLogId: string) {
     job.status = "converting";
     let ffmpegArgs: string[] = [];
 
-    if (job.format === "mp3") {
+    if (job.format === "mp3" || job.format === "mp3_low") {
       ffmpegArgs = [
         "ffmpeg", "-y",
         "-i", tempFile,
@@ -100,7 +135,17 @@ async function processJob(job: ConversionJob, jobLogId: string) {
         "-ar", "44100",
         outputFile
       ];
-    } else if (job.format === "3gp_qcif") {
+    } else if (job.format === "mp3_high") {
+      ffmpegArgs = [
+        "ffmpeg", "-y",
+        "-i", tempFile,
+        "-vn",
+        "-c:a", "libmp3lame",
+        "-b:a", "320k",
+        "-ar", "44100",
+        outputFile
+      ];
+    } else if (job.format === "3gp_qcif" || job.format === "3gp_low") {
       // 176x144 QCIF, H.263 video, AMR audio (Ideal for Starlight M203 and 2G dumb phones)
       ffmpegArgs = [
         "ffmpeg", "-y",
@@ -115,7 +160,7 @@ async function processJob(job: ConversionJob, jobLogId: string) {
         "-b:a", "12.2k",
         outputFile
       ];
-    } else if (job.format === "3gp_qvga") {
+    } else if (job.format === "3gp_qvga" || job.format === "3gp_high") {
       // 320x240 QVGA, MPEG4 video, AAC audio
       ffmpegArgs = [
         "ffmpeg", "-y",
