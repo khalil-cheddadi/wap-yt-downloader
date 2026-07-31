@@ -98,7 +98,18 @@ export async function searchYouTube(query: string, page = 1, pageSize = 5, reqId
   };
 }
 
-export async function downloadSourceVideo(videoId: string, targetFile: string, jobId?: string): Promise<boolean> {
+export interface ProgressData {
+  percent: number;
+  speed?: string;
+  eta?: string;
+}
+
+export async function downloadSourceVideo(
+  videoId: string,
+  targetFile: string,
+  onProgress?: (progress: ProgressData) => void,
+  jobId?: string
+): Promise<boolean> {
   const startTime = Date.now();
   logger.info("JOB", `Starting source video download for videoId "${videoId}"`, jobId);
   const ytdlp = getYtDlpPath();
@@ -107,6 +118,7 @@ export async function downloadSourceVideo(videoId: string, targetFile: string, j
   // Download combined video+audio stream in compatible format or worst video + best audio to save bandwidth
   const proc = spawn([
     ytdlp,
+    "--newline",
     "-f", "b/b[ext=mp4]/w", // best combined or worst combined for fast download
     "-o", targetFile,
     "--no-playlist",
@@ -117,11 +129,45 @@ export async function downloadSourceVideo(videoId: string, targetFile: string, j
     stderr: "pipe",
   });
 
+  // Read stdout in background to parse progress
+  const readStdout = async () => {
+    try {
+      const decoder = new TextDecoder();
+      let buffer = "";
+      for await (const chunk of proc.stdout) {
+        buffer += decoder.decode(chunk, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          const match = line.match(/\[download\]\s+([\d\.]+)%/i);
+          if (match && onProgress) {
+            const percent = Math.min(100, Math.max(0, parseFloat(match[1])));
+            const speedMatch = line.match(/at\s+([^\s]+)/i);
+            const etaMatch = line.match(/ETA\s+([^\s]+)/i);
+            onProgress({
+              percent,
+              speed: speedMatch ? speedMatch[1] : undefined,
+              eta: etaMatch ? etaMatch[1] : undefined,
+            });
+          }
+        }
+      }
+    } catch {
+      // Ignore stream reading errors if process ends early
+    }
+  };
+
+  const stdoutPromise = readStdout();
   const exitCode = await proc.exited;
+  await stdoutPromise;
+
   const elapsedSecs = ((Date.now() - startTime) / 1000).toFixed(2);
   const success = exitCode === 0 && existsSync(targetFile);
 
   if (success) {
+    if (onProgress) {
+      onProgress({ percent: 100 });
+    }
     logger.info("JOB", `Source video download completed in ${elapsedSecs}s`, jobId);
   } else {
     logger.error("JOB", `Source video download failed after ${elapsedSecs}s (exitCode: ${exitCode})`, jobId);

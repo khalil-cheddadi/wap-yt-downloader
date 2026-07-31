@@ -155,10 +155,10 @@ export function renderSearchResults(query: string, searchData: PaginatedSearchRe
         <strong>${escapeHtml(item.title)}</strong><br />
         <small>Channel: ${escapeHtml(item.channel)} | Duration: ${escapeHtml(item.duration)}</small><br /><br />
         <strong>Download Options:</strong><br />
-        &bull; <a href="/convert?id=${escapeHtml(item.id)}&title=${encodeURIComponent(item.title)}&format=mp3_low"><strong>[ MP3 Low 128k (${estimateSize(item.durationSeconds, "mp3_low")}) ]</strong></a><br />
-        &bull; <a href="/convert?id=${escapeHtml(item.id)}&title=${encodeURIComponent(item.title)}&format=mp3_high"><strong>[ MP3 High 320k (${estimateSize(item.durationSeconds, "mp3_high")}) ]</strong></a><br />
-        &bull; <a href="/convert?id=${escapeHtml(item.id)}&title=${encodeURIComponent(item.title)}&format=3gp_low"><strong>[ 3GP Low 176x144 (${estimateSize(item.durationSeconds, "3gp_low")}) ]</strong></a><br />
-        &bull; <a href="/convert?id=${escapeHtml(item.id)}&title=${encodeURIComponent(item.title)}&format=3gp_high"><strong>[ 3GP High 320x240 (${estimateSize(item.durationSeconds, "3gp_high")}) ]</strong></a>
+        &bull; <a href="/convert?id=${escapeHtml(item.id)}&title=${encodeURIComponent(item.title)}&format=mp3_low&duration=${item.durationSeconds}"><strong>[ MP3 Low 128k (${estimateSize(item.durationSeconds, "mp3_low")}) ]</strong></a><br />
+        &bull; <a href="/convert?id=${escapeHtml(item.id)}&title=${encodeURIComponent(item.title)}&format=mp3_high&duration=${item.durationSeconds}"><strong>[ MP3 High 320k (${estimateSize(item.durationSeconds, "mp3_high")}) ]</strong></a><br />
+        &bull; <a href="/convert?id=${escapeHtml(item.id)}&title=${encodeURIComponent(item.title)}&format=3gp_low&duration=${item.durationSeconds}"><strong>[ 3GP Low 176x144 (${estimateSize(item.durationSeconds, "3gp_low")}) ]</strong></a><br />
+        &bull; <a href="/convert?id=${escapeHtml(item.id)}&title=${encodeURIComponent(item.title)}&format=3gp_high&duration=${item.durationSeconds}"><strong>[ 3GP High 320x240 (${estimateSize(item.durationSeconds, "3gp_high")}) ]</strong></a>
       </p>
     </fieldset>`;
     }).join("");
@@ -191,18 +191,56 @@ export function renderSearchResults(query: string, searchData: PaginatedSearchRe
   return renderLayout(`Results for ${query} (Page ${page})`, content);
 }
 
+export function renderProgressBar(percent: number): string {
+  const clamped = Math.min(100, Math.max(0, Math.round(percent)));
+  const totalBlocks = 10;
+  const filledBlocks = Math.round((clamped / 100) * totalBlocks);
+  const emptyBlocks = totalBlocks - filledBlocks;
+  const bar = "█".repeat(filledBlocks) + "░".repeat(emptyBlocks);
+  return `[${bar}] ${clamped}%`;
+}
+
 export function renderStatus(job: ConversionJob): string {
   let metaRefresh = "";
   let statusBox = "";
 
   if (job.status === "pending" || job.status === "downloading" || job.status === "converting") {
     metaRefresh = `<meta http-equiv="refresh" content="5;url=/status?jobId=${job.id}" />`;
-    const statusText = job.status === "downloading" ? "Downloading YouTube video..." : "Converting video format...";
+    let statusText = "Initializing job...";
+    let progressHtml = "";
+
+    if (job.status === "downloading") {
+      statusText = "Downloading YouTube video source...";
+      const p = job.downloadProgress || { percent: 0 };
+      const bar = renderProgressBar(p.percent);
+      const metrics: string[] = [];
+      if (p.speed) metrics.push(`Speed: ${escapeHtml(p.speed)}`);
+      if (p.eta) metrics.push(`ETA: ${escapeHtml(p.eta)}`);
+      const metricsStr = metrics.length > 0 ? `<br /><small>${metrics.join(" | ")}</small>` : "";
+
+      progressHtml = `
+      <code style="font-family:monospace; font-size:1.1em; font-weight:bold;">${bar}</code>
+      ${metricsStr}`;
+    } else if (job.status === "converting") {
+      statusText = "Converting video format...";
+      const p = job.conversionProgress || { percent: 0 };
+      const bar = renderProgressBar(p.percent);
+      const metrics: string[] = [];
+      if (p.speed) metrics.push(`Speed: ${escapeHtml(p.speed)}`);
+      if (p.detail) metrics.push(`Progress: ${escapeHtml(p.detail)}`);
+      const metricsStr = metrics.length > 0 ? `<br /><small>${metrics.join(" | ")}</small>` : "";
+
+      progressHtml = `
+      <code style="font-family:monospace; font-size:1.1em; font-weight:bold;">${bar}</code>
+      ${metricsStr}`;
+    }
+
     statusBox = `
     <fieldset>
       <legend><strong>Progress Status</strong></legend>
       <p align="center">
         <strong>STATUS: ${statusText}</strong><br /><br />
+        ${progressHtml}<br /><br />
         <small>Please wait... Page refreshes automatically every 5 seconds.</small><br /><br />
         <a href="/status?jobId=${job.id}"><strong>[ Manual Refresh ]</strong></a>
       </p>

@@ -127,6 +127,8 @@ async function handleRoute(req: Request, url: URL, path: string, reqId: string):
     const videoId = url.searchParams.get("id");
     const title = url.searchParams.get("title") || "YouTube Video";
     const format = (url.searchParams.get("format") || "mp3") as FormatType;
+    const durationParam = url.searchParams.get("duration");
+    const durationSeconds = durationParam ? parseInt(durationParam, 10) : undefined;
 
     if (!videoId) {
       return new Response(renderError("Invalid video ID."), {
@@ -134,7 +136,7 @@ async function handleRoute(req: Request, url: URL, path: string, reqId: string):
       });
     }
 
-    const job = createJob(videoId, title, format);
+    const job = createJob(videoId, title, format, durationSeconds);
     return Response.redirect(`/status?jobId=${job.id}`, 302);
   }
 

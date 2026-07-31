@@ -6,12 +6,22 @@ import { logger } from "./logger";
 
 export type FormatType = "mp3" | "mp3_low" | "mp3_high" | "3gp_qcif" | "3gp_qvga" | "3gp_low" | "3gp_high";
 
+export interface JobProgress {
+  percent: number;
+  speed?: string;
+  eta?: string;
+  detail?: string;
+}
+
 export interface ConversionJob {
   id: string;
   videoId: string;
   title: string;
+  durationSeconds?: number;
   format: FormatType;
   status: "pending" | "downloading" | "converting" | "completed" | "error";
+  downloadProgress?: JobProgress;
+  conversionProgress?: JobProgress;
   error?: string;
   filename?: string;
   fileSize?: string;
@@ -75,13 +85,14 @@ export function getFormatLabel(format: FormatType): string {
   }
 }
 
-export function createJob(videoId: string, title: string, format: FormatType): ConversionJob {
+export function createJob(videoId: string, title: string, format: FormatType, durationSeconds?: number): ConversionJob {
   const id = crypto.randomUUID();
   const shortId = `job-${id.substring(0, 6)}`;
   const job: ConversionJob = {
     id,
     videoId,
     title,
+    durationSeconds,
     format,
     status: "pending",
     createdAt: Date.now(),
@@ -116,18 +127,32 @@ async function processJob(job: ConversionJob, jobLogId: string) {
   try {
     logger.info("JOB", "Transition status: pending -> downloading", jobLogId);
     job.status = "downloading";
-    const downloadOk = await downloadSourceVideo(job.videoId, tempFile, jobLogId);
+    job.downloadProgress = { percent: 0 };
+    const downloadOk = await downloadSourceVideo(
+      job.videoId,
+      tempFile,
+      (p) => {
+        job.downloadProgress = {
+          percent: p.percent,
+          speed: p.speed,
+          eta: p.eta,
+        };
+      },
+      jobLogId
+    );
     if (!downloadOk) {
       throw new Error("Failed to download video stream from YouTube.");
     }
 
     logger.info("JOB", "Transition status: downloading -> converting", jobLogId);
     job.status = "converting";
+    job.conversionProgress = { percent: 0 };
     let ffmpegArgs: string[] = [];
 
     if (job.format === "mp3" || job.format === "mp3_low") {
       ffmpegArgs = [
         "ffmpeg", "-y",
+        "-progress", "pipe:1", "-nostats",
         "-i", tempFile,
         "-vn",
         "-c:a", "libmp3lame",
@@ -138,6 +163,7 @@ async function processJob(job: ConversionJob, jobLogId: string) {
     } else if (job.format === "mp3_high") {
       ffmpegArgs = [
         "ffmpeg", "-y",
+        "-progress", "pipe:1", "-nostats",
         "-i", tempFile,
         "-vn",
         "-c:a", "libmp3lame",
@@ -149,6 +175,7 @@ async function processJob(job: ConversionJob, jobLogId: string) {
       // 176x144 QCIF, H.263 video, AMR audio (Ideal for Starlight M203 and 2G dumb phones)
       ffmpegArgs = [
         "ffmpeg", "-y",
+        "-progress", "pipe:1", "-nostats",
         "-i", tempFile,
         "-vf", "scale=176:144:force_original_aspect_ratio=decrease,pad=176:144:(ow-iw)/2:(oh-ih)/2",
         "-c:v", "h263",
@@ -164,6 +191,7 @@ async function processJob(job: ConversionJob, jobLogId: string) {
       // 320x240 QVGA, MPEG4 video, AAC audio
       ffmpegArgs = [
         "ffmpeg", "-y",
+        "-progress", "pipe:1", "-nostats",
         "-i", tempFile,
         "-vf", "scale=320:240:force_original_aspect_ratio=decrease,pad=320:240:(ow-iw)/2:(oh-ih)/2",
         "-c:v", "mpeg4",
@@ -179,13 +207,64 @@ async function processJob(job: ConversionJob, jobLogId: string) {
 
     logger.info("JOB", `Starting FFmpeg conversion (${job.format})`, jobLogId);
     const proc = spawn(ffmpegArgs, { stdout: "pipe", stderr: "pipe" });
+
+    // Stream FFmpeg progress output
+    const readFfmpegProgress = async () => {
+      try {
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let outTimeUs = 0;
+        let speed = "";
+        for await (const chunk of proc.stdout) {
+          buffer += decoder.decode(chunk, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            const parts = line.split("=");
+            if (parts.length === 2) {
+              const key = parts[0].trim();
+              const val = parts[1].trim();
+              if (key === "out_time_ms") {
+                outTimeUs = parseInt(val, 10) || 0;
+              } else if (key === "speed") {
+                speed = val;
+              } else if (key === "progress") {
+                if (job.durationSeconds && job.durationSeconds > 0) {
+                  const totalUs = job.durationSeconds * 1000000;
+                  const percent = Math.min(99, Math.max(0, Math.floor((outTimeUs / totalUs) * 100)));
+                  const outSecs = Math.floor(outTimeUs / 1000000);
+                  job.conversionProgress = {
+                    percent,
+                    speed,
+                    detail: `${outSecs}s / ${job.durationSeconds}s`,
+                  };
+                } else {
+                  const outSecs = Math.floor(outTimeUs / 1000000);
+                  job.conversionProgress = {
+                    percent: 50,
+                    speed,
+                    detail: `${outSecs}s processed`,
+                  };
+                }
+              }
+            }
+          }
+        }
+      } catch {
+        // Ignore progress reading errors
+      }
+    };
+
+    const progressPromise = readFfmpegProgress();
     const exitCode = await proc.exited;
+    await progressPromise;
 
     if (exitCode !== 0 || !existsSync(outputFile)) {
       const errText = await new Response(proc.stderr).text();
       throw new Error(`FFmpeg error (code ${exitCode}): ${errText.slice(-200)}`);
     }
 
+    job.conversionProgress = { percent: 100, speed: "100%" };
     const stats = statSync(outputFile);
     const totalElapsedSecs = ((Date.now() - startTime) / 1000).toFixed(2);
     job.status = "completed";
