@@ -187,7 +187,7 @@ export function renderSearchResults(query: string, searchData: PaginatedSearchRe
     listHtml = results.map((item, idx) => {
       const itemNum = (page - 1) * searchData.pageSize + idx + 1;
       const thumbHtml = showThumbnails && item.thumbnailUrl
-        ? `<p align="center"><img src="${escapeHtml(item.thumbnailUrl)}" alt="${escapeHtml(item.title)}" width="120" style="max-width:100%; height:auto;" /></p>`
+        ? `<p align="center"><img src="${escapeHtml(item.thumbnailUrl)}" alt="${escapeHtml(item.title)}" width="120" height="90" /></p>`
         : "";
       return `
     <fieldset>

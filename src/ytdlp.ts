@@ -59,15 +59,7 @@ export async function searchYouTube(query: string, page = 1, pageSize = 5, reqId
     try {
       const data = JSON.parse(line);
       if (data && data.id) {
-        let thumbUrl = `https://i.ytimg.com/vi/${data.id}/default.jpg`;
-        if (typeof data.thumbnail === "string" && data.thumbnail) {
-          thumbUrl = data.thumbnail;
-        } else if (Array.isArray(data.thumbnails) && data.thumbnails.length > 0) {
-          const t = data.thumbnails[0];
-          if (t && typeof t.url === "string") {
-            thumbUrl = t.url;
-          }
-        }
+        const thumbUrl = `https://i.ytimg.com/vi/${data.id}/default.jpg`;
 
         allResults.push({
           id: data.id,
