@@ -222,11 +222,21 @@ export function getNextCleanupInfo(): NextCleanupInfo {
   };
 }
 
-export function getAvailableDownloads(): DownloadedFileItem[] {
-  const now = Date.now();
-  const result: DownloadedFileItem[] = [];
+export interface PaginatedDownloads {
+  items: DownloadedFileItem[];
+  totalItems: number;
+  totalPages: number;
+  currentPage: number;
+  pageSize: number;
+}
 
-  if (!existsSync(DOWNLOADS_DIR)) return result;
+export function getAvailableDownloads(page = 1, pageSize = 5): PaginatedDownloads {
+  const now = Date.now();
+  const allFiles: DownloadedFileItem[] = [];
+
+  if (!existsSync(DOWNLOADS_DIR)) {
+    return { items: [], totalItems: 0, totalPages: 1, currentPage: 1, pageSize };
+  }
 
   try {
     const files = readdirSync(DOWNLOADS_DIR);
@@ -246,7 +256,7 @@ export function getAvailableDownloads(): DownloadedFileItem[] {
         formatLabel = "3GP Video";
       }
 
-      result.push({
+      allFiles.push({
         filename: f,
         size: formatFileSize(stat.size),
         sizeBytes: stat.size,
@@ -260,7 +270,20 @@ export function getAvailableDownloads(): DownloadedFileItem[] {
     // Ignore read errors
   }
 
-  // Sort by newest first
-  return result.sort((a, b) => b.createdAtMs - a.createdAtMs);
+  allFiles.sort((a, b) => b.createdAtMs - a.createdAtMs);
+
+  const totalItems = allFiles.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const validPage = Math.min(Math.max(1, page), totalPages);
+  const startIndex = (validPage - 1) * pageSize;
+  const items = allFiles.slice(startIndex, startIndex + pageSize);
+
+  return {
+    items,
+    totalItems,
+    totalPages,
+    currentPage: validPage,
+    pageSize,
+  };
 }
 

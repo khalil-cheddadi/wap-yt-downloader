@@ -27,9 +27,17 @@ export function formatDuration(seconds: number | undefined): string {
   return `${mins}:${secs < 10 ? "0" : ""}${secs}`;
 }
 
-export async function searchYouTube(query: string, limit = 10): Promise<YouTubeSearchResult[]> {
+export interface PaginatedSearchResults {
+  results: YouTubeSearchResult[];
+  page: number;
+  pageSize: number;
+  hasNextPage: boolean;
+}
+
+export async function searchYouTube(query: string, page = 1, pageSize = 5): Promise<PaginatedSearchResults> {
   const ytdlp = getYtDlpPath();
-  const searchSpec = `ytsearch${limit}:${query}`;
+  const fetchLimit = page * pageSize + 1;
+  const searchSpec = `ytsearch${fetchLimit}:${query}`;
   
   const proc = spawn([ytdlp, searchSpec, "-j", "--flat-playlist", "--no-warnings"], {
     stdout: "pipe",
@@ -39,7 +47,7 @@ export async function searchYouTube(query: string, limit = 10): Promise<YouTubeS
   const output = await new Response(proc.stdout).text();
   await proc.exited;
 
-  const results: YouTubeSearchResult[] = [];
+  const allResults: YouTubeSearchResult[] = [];
   const lines = output.trim().split("\n");
 
   for (const line of lines) {
@@ -47,7 +55,7 @@ export async function searchYouTube(query: string, limit = 10): Promise<YouTubeS
     try {
       const data = JSON.parse(line);
       if (data && data.id) {
-        results.push({
+        allResults.push({
           id: data.id,
           title: data.title || "Untitled Video",
           durationSeconds: data.duration || 0,
@@ -60,7 +68,16 @@ export async function searchYouTube(query: string, limit = 10): Promise<YouTubeS
     }
   }
 
-  return results;
+  const startIndex = (page - 1) * pageSize;
+  const pageResults = allResults.slice(startIndex, startIndex + pageSize);
+  const hasNextPage = allResults.length > startIndex + pageSize;
+
+  return {
+    results: pageResults,
+    page,
+    pageSize,
+    hasNextPage,
+  };
 }
 
 export async function downloadSourceVideo(videoId: string, targetFile: string): Promise<boolean> {

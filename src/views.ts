@@ -1,5 +1,5 @@
-import { ConversionJob, DownloadedFileItem, NextCleanupInfo } from "./converter";
-import { YouTubeSearchResult } from "./ytdlp";
+import { ConversionJob, DownloadedFileItem, NextCleanupInfo, PaginatedDownloads } from "./converter";
+import { YouTubeSearchResult, PaginatedSearchResults } from "./ytdlp";
 
 function escapeHtml(str: string): string {
   return str
@@ -21,7 +21,7 @@ export function renderLayout(title: string, bodyContent: string, metaExtra = "")
 </head>
 <body>
   <div align="center">
-    <strong><a href="/">WAP TUBE</a></strong> | <strong><a href="/downloads">MY DOWNLOADS</a></strong>
+    <strong><a href="/" accesskey="1">[1] WAP TUBE</a></strong> | <strong><a href="/downloads" accesskey="2">[2] MY DOWNLOADS</a></strong>
   </div>
   <hr />
   ${bodyContent}
@@ -40,14 +40,15 @@ export function renderHome(): string {
     <form action="/search" method="get">
       <p>
         <label for="q"><strong>Search Query:</strong></label><br />
-        <input type="text" id="q" name="q" size="20" /><br /><br />
+        <input type="text" id="q" name="q" size="20" accesskey="3" /><br />
+        <small>(Accesskey 3: Focus Search Box)</small><br /><br />
         <input type="submit" value="[ Search YouTube ]" />
       </p>
     </form>
   </fieldset>
 
   <p align="center">
-    <a href="/downloads"><strong>[ View Available Downloads ]</strong></a>
+    <a href="/downloads" accesskey="2"><strong>[2] View Available Downloads</strong></a>
   </p>
 
   <fieldset>
@@ -62,19 +63,40 @@ export function renderHome(): string {
   return renderLayout("Home", content);
 }
 
-export function renderDownloadsList(files: DownloadedFileItem[], cleanupInfo: NextCleanupInfo): string {
+function renderPaginationBar(baseUrl: string, page: number, totalPages: number | null, hasNextPage: boolean): string {
+  const prevLink = page > 1 
+    ? `<a href="${baseUrl}&amp;page=${page - 1}" accesskey="7"><strong>[7] &lt;&lt; Prev</strong></a>` 
+    : `<span style="color:#777;">[7] &lt;&lt; Prev</span>`;
+
+  const hasNext = totalPages !== null ? page < totalPages : hasNextPage;
+  const nextLink = hasNext
+    ? `<a href="${baseUrl}&amp;page=${page + 1}" accesskey="9"><strong>[9] Next &gt;&gt;</strong></a>` 
+    : `<span style="color:#777;">Next &gt;&gt; [9]</span>`;
+
+  const pageStr = totalPages ? `Page ${page} of ${totalPages}` : `Page ${page}`;
+
+  return `
+  <div align="center">
+    ${prevLink} | <strong>${pageStr}</strong> | ${nextLink}
+  </div>`;
+}
+
+export function renderDownloadsList(paginatedDownloads: PaginatedDownloads, cleanupInfo: NextCleanupInfo): string {
+  const { items: files, currentPage: page, totalPages, totalItems } = paginatedDownloads;
   let listHtml = "";
 
   if (files.length === 0) {
     listHtml = `
     <p align="center">
-      <em>No converted files available for download.</em><br /><br />
-      <a href="/"><strong>[ Search &amp; Convert Videos ]</strong></a>
+      <em>No converted files available on this page.</em><br /><br />
+      <a href="/" accesskey="1"><strong>[1] Search &amp; Convert Videos</strong></a>
     </p>`;
   } else {
-    listHtml = files.map((file, idx) => `
+    listHtml = files.map((file, idx) => {
+      const itemNum = (page - 1) * paginatedDownloads.pageSize + idx + 1;
+      return `
     <fieldset>
-      <legend><strong>File #${idx + 1}</strong></legend>
+      <legend><strong>File #${itemNum}</strong></legend>
       <p>
         <strong>${escapeHtml(file.filename)}</strong><br />
         &bull; Format: <strong>${escapeHtml(file.formatLabel)}</strong><br />
@@ -82,41 +104,48 @@ export function renderDownloadsList(files: DownloadedFileItem[], cleanupInfo: Ne
         &bull; Expires in: <strong>${file.expiresInFormatted}</strong><br /><br />
         <a href="/downloads/${encodeURIComponent(file.filename)}"><strong>[ DOWNLOAD FILE ]</strong></a>
       </p>
-    </fieldset>
-    `).join("");
+    </fieldset>`;
+    }).join("");
   }
+
+  const paginationBar = renderPaginationBar("/downloads?", page, totalPages, page < totalPages);
 
   const content = `
   <fieldset>
     <legend><strong>Cleanup Status</strong></legend>
     <p>
-      Next auto-cleanup sweep: <strong>${cleanupInfo.nextCleanupFormatted}</strong><br />
+      Total Files: <strong>${totalItems}</strong> | Next sweep: <strong>${cleanupInfo.nextCleanupFormatted}</strong><br />
       <small>(Files expire ${cleanupInfo.maxAgeHours} hours after conversion)</small>
     </p>
   </fieldset>
 
   <p align="right">
-    <a href="/downloads">[ Refresh List ]</a> | <a href="/">[ New Search ]</a>
+    <a href="/downloads?page=${page}">[ Refresh ]</a> | <a href="/" accesskey="1">[1] Search Home</a>
   </p>
 
+  ${totalItems > paginatedDownloads.pageSize ? paginationBar + "<br />" : ""}
   ${listHtml}
+  ${totalItems > paginatedDownloads.pageSize ? "<br />" + paginationBar : ""}
 
   <p align="center">
-    <a href="/"><strong>[ Back to Search Home ]</strong></a>
+    <a href="/" accesskey="1"><strong>[1] Back to Search Home</strong></a>
   </p>`;
 
   return renderLayout("Available Downloads", content);
 }
 
-export function renderSearchResults(query: string, results: YouTubeSearchResult[]): string {
+export function renderSearchResults(query: string, searchData: PaginatedSearchResults): string {
+  const { results, page, hasNextPage } = searchData;
   let listHtml = "";
 
   if (results.length === 0) {
     listHtml = `<p>No videos found for "<strong>${escapeHtml(query)}</strong>". Please try another search.</p>`;
   } else {
-    listHtml = results.map((item, idx) => `
+    listHtml = results.map((item, idx) => {
+      const itemNum = (page - 1) * searchData.pageSize + idx + 1;
+      return `
     <fieldset>
-      <legend><strong>Result #${idx + 1}</strong></legend>
+      <legend><strong>Result #${itemNum}</strong></legend>
       <p>
         <strong>${escapeHtml(item.title)}</strong><br />
         <small>Channel: ${escapeHtml(item.channel)} | Duration: ${escapeHtml(item.duration)}</small><br /><br />
@@ -125,23 +154,27 @@ export function renderSearchResults(query: string, results: YouTubeSearchResult[
         &bull; <a href="/convert?id=${escapeHtml(item.id)}&title=${encodeURIComponent(item.title)}&format=3gp_qcif"><strong>[ 3GP 176x144 (2G) ]</strong></a><br />
         &bull; <a href="/convert?id=${escapeHtml(item.id)}&title=${encodeURIComponent(item.title)}&format=3gp_qvga"><strong>[ 3GP 320x240 ]</strong></a>
       </p>
-    </fieldset>
-    `).join("");
+    </fieldset>`;
+    }).join("");
   }
+
+  const paginationBar = renderPaginationBar(`/search?q=${encodeURIComponent(query)}`, page, null, hasNextPage);
 
   const content = `
   <fieldset>
     <legend><strong>Search Results</strong></legend>
-    <p>Query: <strong>"${escapeHtml(query)}"</strong> (${results.length} found) | <a href="/">[ New Search ]</a></p>
+    <p>Query: <strong>"${escapeHtml(query)}"</strong> | <a href="/" accesskey="1">[1] New Search</a></p>
   </fieldset>
 
+  ${results.length > 0 ? paginationBar + "<br />" : ""}
   ${listHtml}
+  ${results.length > 0 ? "<br />" + paginationBar : ""}
 
   <p align="center">
-    <a href="/"><strong>[ Search Again ]</strong></a>
+    <a href="/" accesskey="1"><strong>[1] Search Again</strong></a>
   </p>`;
 
-  return renderLayout(`Results for ${query}`, content);
+  return renderLayout(`Results for ${query} (Page ${page})`, content);
 }
 
 export function renderStatus(job: ConversionJob): string {
@@ -172,7 +205,7 @@ export function renderStatus(job: ConversionJob): string {
       </p>
     </fieldset>
     <p align="center">
-      <a href="/">[ Download Another Video ]</a> | <a href="/downloads">[ View Downloads ]</a>
+      <a href="/" accesskey="1">[1] Download Another Video</a> | <a href="/downloads" accesskey="2">[2] View Downloads</a>
     </p>`;
   } else {
     statusBox = `
@@ -181,7 +214,7 @@ export function renderStatus(job: ConversionJob): string {
       <p>
         <strong>Error Details:</strong><br />
         <small>${escapeHtml(job.error || "An error occurred while processing the video.")}</small><br /><br />
-        <a href="/"><strong>[ Try Again ]</strong></a>
+        <a href="/" accesskey="1"><strong>[1] Try Again</strong></a>
       </p>
     </fieldset>`;
   }
@@ -201,7 +234,7 @@ export function renderError(message: string): string {
   <fieldset>
     <legend><strong>Error Notice</strong></legend>
     <p><strong>Message:</strong> ${escapeHtml(message)}</p>
-    <p align="center"><a href="/"><strong>[ Return to Home ]</strong></a></p>
+    <p align="center"><a href="/" accesskey="1"><strong>[1] Return to Home</strong></a></p>
   </fieldset>`;
 
   return renderLayout("Error", content);

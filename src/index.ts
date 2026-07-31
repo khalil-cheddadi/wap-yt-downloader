@@ -24,7 +24,9 @@ const server = Bun.serve({
 
       // Available downloads listing page
       if (path === "/downloads" || path === "/downloads/") {
-        const downloads = getAvailableDownloads();
+        const pageParam = url.searchParams.get("page");
+        const page = Math.max(1, parseInt(pageParam || "1") || 1);
+        const downloads = getAvailableDownloads(page, 5);
         const cleanupInfo = getNextCleanupInfo();
         return new Response(renderDownloadsList(downloads, cleanupInfo), {
           headers: { "Content-Type": "text/html; charset=utf-8" },
@@ -37,8 +39,10 @@ const server = Bun.serve({
         if (!query) {
           return Response.redirect("/", 302);
         }
-        const results = await searchYouTube(query, 10);
-        return new Response(renderSearchResults(query, results), {
+        const pageParam = url.searchParams.get("page");
+        const page = Math.max(1, parseInt(pageParam || "1") || 1);
+        const searchData = await searchYouTube(query, page, 5);
+        return new Response(renderSearchResults(query, searchData), {
           headers: { "Content-Type": "text/html; charset=utf-8" },
         });
       }
