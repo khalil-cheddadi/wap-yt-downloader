@@ -1,4 +1,4 @@
-import { createJob, getJob, FormatType, getAvailableDownloads, getNextCleanupInfo } from "./converter";
+import { createJob, getJob, FormatType, getAvailableDownloads, getNextCleanupInfo, getActiveAndQueuedJobs } from "./converter";
 import { searchYouTube } from "./ytdlp";
 import { renderError, renderHome, renderSearchResults, renderStatus, renderDownloadsList } from "./views";
 import { join, resolve, relative, isAbsolute } from "path";
@@ -88,7 +88,8 @@ async function handleRoute(req: Request, url: URL, path: string, reqId: string):
     const page = Math.max(1, parseInt(pageParam || "1") || 1);
     const downloads = getAvailableDownloads(page, 5);
     const cleanupInfo = getNextCleanupInfo();
-    return new Response(renderDownloadsList(downloads, cleanupInfo), {
+    const activeJobs = getActiveAndQueuedJobs();
+    return new Response(renderDownloadsList(downloads, cleanupInfo, activeJobs), {
       headers: { "Content-Type": "text/html; charset=utf-8" },
     });
   }
@@ -122,6 +123,22 @@ async function handleRoute(req: Request, url: URL, path: string, reqId: string):
     return new Response(renderSearchResults(query, searchData, showThumbnails), { headers });
   }
 
+function getClientIp(req: Request, server: any): string {
+  const forwarded = req.headers.get("x-forwarded-for");
+  if (forwarded) {
+    const ips = forwarded.split(",");
+    if (ips[0] && ips[0].trim()) {
+      return ips[0].trim();
+    }
+  }
+  const realIp = req.headers.get("x-real-ip");
+  if (realIp && realIp.trim()) {
+    return realIp.trim();
+  }
+  const ip = server.requestIP(req);
+  return ip?.address || "127.0.0.1";
+}
+
   // Start conversion job
   if (path === "/convert") {
     const videoId = url.searchParams.get("id");
@@ -136,8 +153,16 @@ async function handleRoute(req: Request, url: URL, path: string, reqId: string):
       });
     }
 
-    const job = createJob(videoId, title, format, durationSeconds);
-    return Response.redirect(`/status?jobId=${job.id}`, 302);
+    const clientIp = getClientIp(req, server);
+    try {
+      const job = createJob(videoId, title, format, durationSeconds, clientIp);
+      return Response.redirect(`/status?jobId=${job.id}`, 302);
+    } catch (err: any) {
+      return new Response(renderError(err.message || "Failed to submit download job."), {
+        status: 429,
+        headers: { "Content-Type": "text/html; charset=utf-8" },
+      });
+    }
   }
 
   // Status page (Auto-refresh polling)
@@ -188,12 +213,13 @@ async function handleRoute(req: Request, url: URL, path: string, reqId: string):
     const isMp3 = filename.endsWith(".mp3");
     const contentType = is3gp ? "video/3gpp" : isMp3 ? "audio/mpeg" : "application/octet-stream";
 
-    logger.info("MEDIA", `Streaming file "${filename}" (${(stats.size / 1024 / 1024).toFixed(2)} MB) to client`, reqId);
+    const asciiFilename = filename.replace(/[^\x20-\x7E]/g, "_").replace(/"/g, "_");
+    const encodedFilename = encodeURIComponent(filename);
 
     return new Response(file, {
       headers: {
         "Content-Type": contentType,
-        "Content-Disposition": `attachment; filename="${filename.replace(/"/g, '_')}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+        "Content-Disposition": `attachment; filename="${asciiFilename}"; filename*=UTF-8''${encodedFilename}`,
       },
     });
   }

@@ -1,4 +1,4 @@
-import { ConversionJob, DownloadedFileItem, NextCleanupInfo, PaginatedDownloads, estimateSize, getFormatLabel } from "./converter";
+import { ConversionJob, DownloadedFileItem, NextCleanupInfo, PaginatedDownloads, estimateSize, getFormatLabel, getQueuePosition } from "./converter";
 import { YouTubeSearchResult, PaginatedSearchResults } from "./ytdlp";
 
 function escapeHtml(str: string): string {
@@ -82,9 +82,50 @@ function renderPaginationBar(baseUrl: string, page: number, totalPages: number |
   </div>`;
 }
 
-export function renderDownloadsList(paginatedDownloads: PaginatedDownloads, cleanupInfo: NextCleanupInfo): string {
+export function renderDownloadsList(
+  paginatedDownloads: PaginatedDownloads,
+  cleanupInfo: NextCleanupInfo,
+  activeJobs: ConversionJob[] = []
+): string {
   const { items: files, currentPage: page, totalPages, totalItems } = paginatedDownloads;
   let listHtml = "";
+  let activeJobsHtml = "";
+  let metaRefresh = "";
+
+  if (activeJobs.length > 0) {
+    metaRefresh = `<meta http-equiv="refresh" content="10;url=/downloads?page=${page}" />`;
+    const jobsContent = activeJobs.map((job, idx) => {
+      let statusStr = "";
+      if (job.status === "queued") {
+        const pos = getQueuePosition(job.id);
+        statusStr = pos !== undefined ? `Queued (#${pos} in line)` : "Queued";
+      } else if (job.status === "downloading") {
+        const p = job.downloadProgress?.percent || 0;
+        statusStr = `Downloading (${p}%)`;
+      } else if (job.status === "converting") {
+        const p = job.conversionProgress?.percent || 0;
+        statusStr = `Converting (${p}%)`;
+      } else {
+        statusStr = "Processing...";
+      }
+
+      const formatName = getFormatLabel(job.format);
+      return `
+      <p style="margin-bottom: 8px;">
+        <strong>Job #${idx + 1}: ${escapeHtml(job.title)}</strong><br />
+        &bull; Format: <strong>${escapeHtml(formatName)}</strong><br />
+        &bull; Status: <strong>${escapeHtml(statusStr)}</strong><br />
+        <a href="/status?jobId=${job.id}"><strong>[ Track Progress ]</strong></a>
+      </p>`;
+    }).join("<hr style='border: 0; border-top: 1px dashed #ccc;' />");
+
+    activeJobsHtml = `
+    <fieldset>
+      <legend><strong>Active &amp; Queued Jobs (${activeJobs.length})</strong></legend>
+      ${jobsContent}
+      <p align="right"><small>(Refreshes automatically every 10s)</small></p>
+    </fieldset><br />`;
+  }
 
   if (files.length === 0) {
     listHtml = `
@@ -124,6 +165,7 @@ export function renderDownloadsList(paginatedDownloads: PaginatedDownloads, clea
     <a href="/downloads?page=${page}">[ Refresh ]</a> | <a href="/" accesskey="1">[1] Search Home</a>
   </p>
 
+  ${activeJobsHtml}
   ${totalItems > paginatedDownloads.pageSize ? paginationBar + "<br />" : ""}
   ${listHtml}
   ${totalItems > paginatedDownloads.pageSize ? "<br />" + paginationBar : ""}
@@ -132,7 +174,7 @@ export function renderDownloadsList(paginatedDownloads: PaginatedDownloads, clea
     <a href="/" accesskey="1"><strong>[1] Back to Search Home</strong></a>
   </p>`;
 
-  return renderLayout("Available Downloads", content);
+  return renderLayout("Available Downloads", content, metaRefresh);
 }
 
 export function renderSearchResults(query: string, searchData: PaginatedSearchResults, showThumbnails = false): string {
@@ -204,12 +246,16 @@ export function renderStatus(job: ConversionJob): string {
   let metaRefresh = "";
   let statusBox = "";
 
-  if (job.status === "pending" || job.status === "downloading" || job.status === "converting") {
+  if (job.status === "queued" || job.status === "pending" || job.status === "downloading" || job.status === "converting") {
     metaRefresh = `<meta http-equiv="refresh" content="5;url=/status?jobId=${job.id}" />`;
     let statusText = "Initializing job...";
     let progressHtml = "";
 
-    if (job.status === "downloading") {
+    if (job.status === "queued") {
+      const pos = getQueuePosition(job.id);
+      statusText = pos !== undefined ? `Queued (Position #${pos} in line)` : "Queued in processing queue";
+      progressHtml = `<p align="center"><small>Your download will start automatically as soon as an active processing slot frees up.</small></p>`;
+    } else if (job.status === "downloading") {
       statusText = "Downloading YouTube video source...";
       const p = job.downloadProgress || { percent: 0 };
       const bar = renderProgressBar(p.percent);

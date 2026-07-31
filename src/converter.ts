@@ -19,7 +19,8 @@ export interface ConversionJob {
   title: string;
   durationSeconds?: number;
   format: FormatType;
-  status: "pending" | "downloading" | "converting" | "completed" | "error";
+  status: "queued" | "pending" | "downloading" | "converting" | "completed" | "error";
+  clientIp: string;
   downloadProgress?: JobProgress;
   conversionProgress?: JobProgress;
   error?: string;
@@ -36,6 +37,59 @@ if (!existsSync(DOWNLOADS_DIR)) mkdirSync(DOWNLOADS_DIR, { recursive: true });
 if (!existsSync(TEMP_DIR)) mkdirSync(TEMP_DIR, { recursive: true });
 
 const jobsMap = new Map<string, ConversionJob>();
+const jobQueue: ConversionJob[] = [];
+let activeJobsCount = 0;
+
+export let MAX_CONCURRENT_JOBS = parseInt(process.env.MAX_CONCURRENT_JOBS || "5", 10);
+export let MAX_JOBS_PER_IP = parseInt(process.env.MAX_JOBS_PER_IP || "3", 10);
+
+export function setQueueConfig(config: { maxConcurrent?: number; maxPerIp?: number }) {
+  if (config.maxConcurrent !== undefined) MAX_CONCURRENT_JOBS = config.maxConcurrent;
+  if (config.maxPerIp !== undefined) MAX_JOBS_PER_IP = config.maxPerIp;
+}
+
+export function getIpActiveAndQueuedCount(clientIp: string): number {
+  let count = 0;
+  for (const job of jobsMap.values()) {
+    if (
+      job.clientIp === clientIp &&
+      (job.status === "queued" || job.status === "pending" || job.status === "downloading" || job.status === "converting")
+    ) {
+      count++;
+    }
+  }
+  return count;
+}
+
+export function getQueuePosition(jobId: string): number | undefined {
+  const idx = jobQueue.findIndex((j) => j.id === jobId);
+  return idx !== -1 ? idx + 1 : undefined;
+}
+
+export function getQueueStats() {
+  return {
+    activeJobsCount,
+    queuedJobsCount: jobQueue.length,
+    maxConcurrentJobs: MAX_CONCURRENT_JOBS,
+    maxJobsPerIp: MAX_JOBS_PER_IP,
+  };
+}
+
+export function getActiveAndQueuedJobs(): ConversionJob[] {
+  const activeAndQueued: ConversionJob[] = [];
+  for (const job of jobsMap.values()) {
+    if (
+      job.status === "queued" ||
+      job.status === "pending" ||
+      job.status === "downloading" ||
+      job.status === "converting"
+    ) {
+      activeAndQueued.push(job);
+    }
+  }
+  activeAndQueued.sort((a, b) => b.createdAt - a.createdAt);
+  return activeAndQueued;
+}
 
 export function sanitizeFilename(title: string): string {
   const clean = title
@@ -85,7 +139,40 @@ export function getFormatLabel(format: FormatType): string {
   }
 }
 
-export function createJob(videoId: string, title: string, format: FormatType, durationSeconds?: number): ConversionJob {
+function processQueue() {
+  while (activeJobsCount < MAX_CONCURRENT_JOBS && jobQueue.length > 0) {
+    const job = jobQueue.shift();
+    if (!job) break;
+
+    activeJobsCount++;
+    const shortId = `job-${job.id.substring(0, 6)}`;
+    logger.info("QUEUE", `Starting queued job | Title: "${job.title}" | Active: ${activeJobsCount}/${MAX_CONCURRENT_JOBS}`, shortId);
+
+    processJob(job, shortId)
+      .catch((err) => {
+        job.status = "error";
+        job.error = err.message || "Unknown conversion error";
+        logger.error("JOB", `Unhandled error processing job: ${job.error}`, shortId);
+      })
+      .finally(() => {
+        activeJobsCount = Math.max(0, activeJobsCount - 1);
+        processQueue();
+      });
+  }
+}
+
+export function createJob(
+  videoId: string,
+  title: string,
+  format: FormatType,
+  durationSeconds?: number,
+  clientIp: string = "127.0.0.1"
+): ConversionJob {
+  const currentIpCount = getIpActiveAndQueuedCount(clientIp);
+  if (currentIpCount >= MAX_JOBS_PER_IP) {
+    throw new Error(`Maximum limit of ${MAX_JOBS_PER_IP} active or queued downloads per IP reached. Please wait for existing jobs to complete.`);
+  }
+
   const id = crypto.randomUUID();
   const shortId = `job-${id.substring(0, 6)}`;
   const job: ConversionJob = {
@@ -94,19 +181,17 @@ export function createJob(videoId: string, title: string, format: FormatType, du
     title,
     durationSeconds,
     format,
-    status: "pending",
+    status: "queued",
+    clientIp,
     createdAt: Date.now(),
   };
   jobsMap.set(id, job);
+  jobQueue.push(job);
 
-  logger.info("JOB", `Created job | Title: "${title}" | Format: ${format}`, shortId, { videoId });
+  const position = jobQueue.length;
+  logger.info("JOB", `Created job | Title: "${title}" | Format: ${format} | IP: ${clientIp} | Status: queued (pos ${position})`, shortId, { videoId });
 
-  // Process asynchronously
-  processJob(job, shortId).catch((err) => {
-    job.status = "error";
-    job.error = err.message || "Unknown conversion error";
-    logger.error("JOB", `Unhandled error processing job: ${job.error}`, shortId);
-  });
+  processQueue();
 
   return job;
 }
