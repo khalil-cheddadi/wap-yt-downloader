@@ -115,11 +115,11 @@ export async function downloadSourceVideo(
   const ytdlp = getYtDlpPath();
   const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
   
-  // Download combined video+audio stream in compatible format or worst video + best audio to save bandwidth
+  // Download video stream capped at 360p max height to optimize bandwidth and speed
   const proc = spawn([
     ytdlp,
     "--newline",
-    "-f", "b/b[ext=mp4]/w", // best combined or worst combined for fast download
+    "-f", "b[height<=360]/b[ext=mp4][height<=360]/worstvideo[height<=360]+bestaudio/w",
     "-o", targetFile,
     "--no-playlist",
     "--no-warnings",
