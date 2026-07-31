@@ -1,6 +1,7 @@
 import { spawn } from "bun";
 import { existsSync } from "fs";
 import { join } from "path";
+import { logger } from "./logger";
 
 export interface YouTubeSearchResult {
   id: string;
@@ -34,7 +35,9 @@ export interface PaginatedSearchResults {
   hasNextPage: boolean;
 }
 
-export async function searchYouTube(query: string, page = 1, pageSize = 5): Promise<PaginatedSearchResults> {
+export async function searchYouTube(query: string, page = 1, pageSize = 5, reqId?: string): Promise<PaginatedSearchResults> {
+  const startTime = Date.now();
+  logger.info("SEARCH", `Executing YouTube search | Query: "${query}" | Page: ${page}`, reqId);
   const ytdlp = getYtDlpPath();
   const fetchLimit = page * pageSize + 1;
   const searchSpec = `ytsearch${fetchLimit}:${query}`;
@@ -71,6 +74,9 @@ export async function searchYouTube(query: string, page = 1, pageSize = 5): Prom
   const startIndex = (page - 1) * pageSize;
   const pageResults = allResults.slice(startIndex, startIndex + pageSize);
   const hasNextPage = allResults.length > startIndex + pageSize;
+  const durationMs = Date.now() - startTime;
+
+  logger.info("SEARCH", `Search finished | Found: ${pageResults.length} items`, reqId, { Duration: `${durationMs}ms` });
 
   return {
     results: pageResults,
@@ -80,7 +86,9 @@ export async function searchYouTube(query: string, page = 1, pageSize = 5): Prom
   };
 }
 
-export async function downloadSourceVideo(videoId: string, targetFile: string): Promise<boolean> {
+export async function downloadSourceVideo(videoId: string, targetFile: string, jobId?: string): Promise<boolean> {
+  const startTime = Date.now();
+  logger.info("JOB", `Starting source video download for videoId "${videoId}"`, jobId);
   const ytdlp = getYtDlpPath();
   const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
   
@@ -98,5 +106,14 @@ export async function downloadSourceVideo(videoId: string, targetFile: string): 
   });
 
   const exitCode = await proc.exited;
-  return exitCode === 0 && existsSync(targetFile);
+  const elapsedSecs = ((Date.now() - startTime) / 1000).toFixed(2);
+  const success = exitCode === 0 && existsSync(targetFile);
+
+  if (success) {
+    logger.info("JOB", `Source video download completed in ${elapsedSecs}s`, jobId);
+  } else {
+    logger.error("JOB", `Source video download failed after ${elapsedSecs}s (exitCode: ${exitCode})`, jobId);
+  }
+
+  return success;
 }

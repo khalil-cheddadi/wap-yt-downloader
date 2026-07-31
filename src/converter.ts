@@ -2,6 +2,7 @@ import { spawn } from "bun";
 import { existsSync, unlinkSync, readdirSync, statSync, mkdirSync } from "fs";
 import { join } from "path";
 import { downloadSourceVideo } from "./ytdlp";
+import { logger } from "./logger";
 
 export type FormatType = "mp3" | "3gp_qcif" | "3gp_qvga";
 
@@ -42,6 +43,7 @@ function formatFileSize(bytes: number): string {
 
 export function createJob(videoId: string, title: string, format: FormatType): ConversionJob {
   const id = crypto.randomUUID();
+  const shortId = `job-${id.substring(0, 6)}`;
   const job: ConversionJob = {
     id,
     videoId,
@@ -52,10 +54,13 @@ export function createJob(videoId: string, title: string, format: FormatType): C
   };
   jobsMap.set(id, job);
 
+  logger.info("JOB", `Created job | Title: "${title}" | Format: ${format}`, shortId, { videoId });
+
   // Process asynchronously
-  processJob(job).catch((err) => {
+  processJob(job, shortId).catch((err) => {
     job.status = "error";
     job.error = err.message || "Unknown conversion error";
+    logger.error("JOB", `Unhandled error processing job: ${job.error}`, shortId);
   });
 
   return job;
@@ -65,20 +70,23 @@ export function getJob(id: string): ConversionJob | undefined {
   return jobsMap.get(id);
 }
 
-async function processJob(job: ConversionJob) {
+async function processJob(job: ConversionJob, jobLogId: string) {
   const tempFile = join(TEMP_DIR, `${job.id}_src.mp4`);
   const ext = job.format === "mp3" ? "mp3" : "3gp";
   const safeTitle = sanitizeFilename(job.title);
   const outputFilename = `${safeTitle}.${ext}`;
   const outputFile = join(DOWNLOADS_DIR, outputFilename);
+  const startTime = Date.now();
 
   try {
+    logger.info("JOB", "Transition status: pending -> downloading", jobLogId);
     job.status = "downloading";
-    const downloadOk = await downloadSourceVideo(job.videoId, tempFile);
+    const downloadOk = await downloadSourceVideo(job.videoId, tempFile, jobLogId);
     if (!downloadOk) {
       throw new Error("Failed to download video stream from YouTube.");
     }
 
+    logger.info("JOB", "Transition status: downloading -> converting", jobLogId);
     job.status = "converting";
     let ffmpegArgs: string[] = [];
 
@@ -124,6 +132,7 @@ async function processJob(job: ConversionJob) {
       ];
     }
 
+    logger.info("JOB", `Starting FFmpeg conversion (${job.format})`, jobLogId);
     const proc = spawn(ffmpegArgs, { stdout: "pipe", stderr: "pipe" });
     const exitCode = await proc.exited;
 
@@ -133,13 +142,21 @@ async function processJob(job: ConversionJob) {
     }
 
     const stats = statSync(outputFile);
+    const totalElapsedSecs = ((Date.now() - startTime) / 1000).toFixed(2);
     job.status = "completed";
     job.filename = outputFilename;
     job.fileSize = formatFileSize(stats.size);
 
+    logger.info(
+      "JOB",
+      `Transition status: converting -> completed | File: "${outputFilename}" | Size: ${job.fileSize} | Duration: ${totalElapsedSecs}s`,
+      jobLogId
+    );
+
   } catch (err: any) {
     job.status = "error";
     job.error = err.message || "Conversion failed";
+    logger.error("JOB", `Transition status: -> error | Reason: ${job.error}`, jobLogId);
   } finally {
     // Clean up temporary downloaded video source
     if (existsSync(tempFile)) {
@@ -185,26 +202,38 @@ export function formatDurationSeconds(seconds: number): string {
 export function runCleanup() {
   const now = Date.now();
   nextCleanupTime = now + CLEANUP_INTERVAL_MS;
+  let deletedFiles = 0;
+  let checkedFiles = 0;
 
   try {
     const files = readdirSync(DOWNLOADS_DIR);
     for (const f of files) {
       if (f === "temp" || f.startsWith(".")) continue;
+      checkedFiles++;
       const path = join(DOWNLOADS_DIR, f);
       const stat = statSync(path);
       if (now - stat.mtimeMs > MAX_FILE_AGE_MS) {
         unlinkSync(path);
+        deletedFiles++;
       }
     }
 
     // Clean up old jobs from memory
+    let deletedJobs = 0;
     for (const [id, job] of jobsMap.entries()) {
       if (now - job.createdAt > MAX_FILE_AGE_MS) {
         jobsMap.delete(id);
+        deletedJobs++;
       }
     }
-  } catch {
-    // Ignore cleanup errors
+
+    logger.info("MEDIA", `Background cleanup sweep completed`, undefined, {
+      "Checked Files": checkedFiles,
+      "Deleted Expired Files": deletedFiles,
+      "Cleaned Jobs": deletedJobs,
+    });
+  } catch (err: any) {
+    logger.error("MEDIA", `Error during background cleanup sweep: ${err.message}`);
   }
 }
 
