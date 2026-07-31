@@ -40,6 +40,17 @@ const server = Bun.serve({
 logger.info("SERVER", `Server running at http://localhost:${server.port}`);
 
 async function handleRoute(req: Request, url: URL, path: string, reqId: string): Promise<Response> {
+  // Serve favicon
+  if (path === "/favicon.ico") {
+    const faviconPath = join(import.meta.dir, "favicon.ico");
+    if (existsSync(faviconPath)) {
+      return new Response(Bun.file(faviconPath), {
+        headers: { "Content-Type": "image/x-icon" },
+      });
+    }
+    return new Response(null, { status: 404 });
+  }
+
   // Home page
   if (path === "/") {
     return new Response(renderHome(), {
