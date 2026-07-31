@@ -149,7 +149,7 @@ async function processJob(job: ConversionJob) {
 }
 
 const CLEANUP_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
-const MAX_FILE_AGE_MS = 3 * 60 * 60 * 1000; // 3 hours
+const MAX_FILE_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 let nextCleanupTime = Date.now() + CLEANUP_INTERVAL_MS;
 
@@ -218,7 +218,7 @@ export function getNextCleanupInfo(): NextCleanupInfo {
   return {
     nextCleanupInSeconds,
     nextCleanupFormatted: formatDurationSeconds(nextCleanupInSeconds),
-    maxAgeHours: 3,
+    maxAgeHours: 24,
   };
 }
 
