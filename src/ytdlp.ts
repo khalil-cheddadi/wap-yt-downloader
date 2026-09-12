@@ -10,6 +10,9 @@ export interface YouTubeSearchResult {
   durationSeconds: number;
   channel: string;
   thumbnailUrl: string;
+  viewCount?: number;
+  views: string;
+  uploadDate: string;
 }
 
 export function ensureHostDependencies(): void {
@@ -50,6 +53,33 @@ export function formatDuration(seconds: number | undefined): string {
   return `${mins}:${secs < 10 ? "0" : ""}${secs}`;
 }
 
+export function formatViewCount(views: number | undefined | null): string {
+  if (views === undefined || views === null || isNaN(views) || views < 0) return "Unknown";
+  return new Intl.NumberFormat("en-US", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(views);
+}
+
+export function formatUploadDate(uploadDate?: string | null, timestamp?: number | null): string {
+  if (uploadDate && /^\d{8}$/.test(uploadDate)) {
+    const year = uploadDate.slice(0, 4);
+    const month = uploadDate.slice(4, 6);
+    const day = uploadDate.slice(6, 8);
+    return `${year}-${month}-${day}`;
+  }
+  if (timestamp && !isNaN(timestamp) && timestamp > 0) {
+    const d = new Date(timestamp * 1000);
+    if (!isNaN(d.getTime())) {
+      const year = d.getUTCFullYear();
+      const month = String(d.getUTCMonth() + 1).padStart(2, "0");
+      const day = String(d.getUTCDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    }
+  }
+  return "Unknown";
+}
+
 export interface PaginatedSearchResults {
   results: YouTubeSearchResult[];
   page: number;
@@ -63,7 +93,15 @@ export async function searchYouTube(query: string, page = 1, pageSize = 5, reqId
   const fetchLimit = page * pageSize + 1;
   const searchSpec = `ytsearch${fetchLimit}:${query}`;
   
-  const proc = spawn(["yt-dlp", searchSpec, "-j", "--flat-playlist", "--no-warnings"], {
+  const proc = spawn([
+    "yt-dlp",
+    searchSpec,
+    "-j",
+    "--flat-playlist",
+    "--no-warnings",
+    "--extractor-args",
+    "youtubetab:approximate_date",
+  ], {
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -87,6 +125,10 @@ export async function searchYouTube(query: string, page = 1, pageSize = 5, reqId
       const data = JSON.parse(line);
       if (data && data.id) {
         const thumbUrl = `https://i.ytimg.com/vi/${data.id}/default.jpg`;
+        const viewCount = typeof data.view_count === "number"
+          ? data.view_count
+          : (typeof data.view_count === "string" && !isNaN(Number(data.view_count)) ? Number(data.view_count) : undefined);
+        const uploadDate = formatUploadDate(data.upload_date, data.timestamp);
 
         allResults.push({
           id: data.id,
@@ -95,6 +137,9 @@ export async function searchYouTube(query: string, page = 1, pageSize = 5, reqId
           duration: formatDuration(data.duration),
           channel: data.uploader || data.channel || "Unknown Channel",
           thumbnailUrl: thumbUrl,
+          viewCount,
+          views: formatViewCount(viewCount),
+          uploadDate,
         });
       }
     } catch {

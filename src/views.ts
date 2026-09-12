@@ -189,13 +189,16 @@ export function renderSearchResults(query: string, searchData: PaginatedSearchRe
       const thumbHtml = showThumbnails && item.thumbnailUrl
         ? `<p align="center"><img src="${escapeHtml(item.thumbnailUrl)}" alt="${escapeHtml(item.title)}" width="120" height="90" /></p>`
         : "";
+      const viewsTitle = item.viewCount !== undefined
+        ? ` title="${item.viewCount === 1 ? "1 view" : item.viewCount.toLocaleString("en-US") + " views"}"`
+        : "";
       return `
     <fieldset>
       <legend><strong>Result #${itemNum}</strong></legend>
       ${thumbHtml}
       <p>
         <strong>${escapeHtml(item.title)}</strong><br />
-        <small>Channel: ${escapeHtml(item.channel)} | Duration: ${escapeHtml(item.duration)}</small><br /><br />
+        <small>Channel: ${escapeHtml(item.channel)} | Duration: ${escapeHtml(item.duration)} | Views: <span${viewsTitle}>${escapeHtml(item.views)}</span> | Uploaded: ${escapeHtml(item.uploadDate)}</small><br /><br />
         <strong>Download Options:</strong><br />
         &bull; <a href="/convert?id=${escapeHtml(item.id)}&title=${encodeURIComponent(item.title)}&format=mp3_low&duration=${item.durationSeconds}"><strong>[ MP3 Low 128k (${estimateSize(item.durationSeconds, "mp3_low")}) ]</strong></a><br />
         &bull; <a href="/convert?id=${escapeHtml(item.id)}&title=${encodeURIComponent(item.title)}&format=mp3_high&duration=${item.durationSeconds}"><strong>[ MP3 High 320k (${estimateSize(item.durationSeconds, "mp3_high")}) ]</strong></a><br />
