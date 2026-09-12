@@ -1,4 +1,4 @@
-import { createJob, getJob, FormatType, getAvailableDownloads, getNextCleanupInfo, getActiveAndQueuedJobs } from "./converter";
+import { createJob, getJob, FormatType, getAvailableDownloads, getNextCleanupInfo, getActiveAndQueuedJobs, purgeTempDir } from "./converter";
 import { searchYouTube, ensureHostDependencies } from "./ytdlp";
 import { renderError, renderHome, renderSearchResults, renderStatus, renderDownloadsList } from "./views";
 import { join, resolve, relative, isAbsolute } from "path";
@@ -7,6 +7,9 @@ import { logger, generateReqId } from "./logger";
 
 // Verify system dependencies before starting (fails fast if yt-dlp or ffmpeg is missing)
 ensureHostDependencies();
+
+// Clean up any stale temporary files from prior interrupted runs
+purgeTempDir();
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 const DOWNLOADS_DIR = join(import.meta.dir, "..", "downloads");

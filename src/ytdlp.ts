@@ -1,5 +1,5 @@
 import { spawn } from "bun";
-import { existsSync } from "fs";
+import { existsSync, statSync } from "fs";
 import { join } from "path";
 import { logger } from "./logger";
 
@@ -175,127 +175,187 @@ export interface DownloadResult {
   stderr?: string;
 }
 
+export function getCachedSourceFile(targetFile: string): string | null {
+  const candidates = [
+    targetFile,
+    `${targetFile}.mp4`,
+    `${targetFile}.webm`,
+    `${targetFile}.mkv`,
+    targetFile.replace(/\.mp4$/, ".webm"),
+    targetFile.replace(/\.mp4$/, ".mkv"),
+  ];
+  for (const cand of candidates) {
+    if (existsSync(cand)) {
+      try {
+        const stat = statSync(cand);
+        if (stat.isFile() && stat.size > 0) {
+          return cand;
+        }
+      } catch { }
+    }
+  }
+  return null;
+}
+
+const activeDownloads = new Map<string, Promise<DownloadResult>>();
+
+export function getActiveDownloadsCount(): number {
+  return activeDownloads.size;
+}
+
+export function clearActiveDownloadsForTest(): void {
+  activeDownloads.clear();
+}
+
 export async function downloadSourceVideo(
   videoId: string,
   targetFile: string,
   onProgress?: (progress: ProgressData) => void,
   jobId?: string
 ): Promise<DownloadResult> {
-  const startTime = Date.now();
-  logger.info("JOB", `Starting source video download for videoId "${videoId}"`, jobId);
-  const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
-  
-  // Download video stream capped at 480p max height to optimize bandwidth and speed.
-  // Merging audio and video automatically uses host ffmpeg from PATH.
-  const proc = spawn([
-    "yt-dlp",
-    "--newline",
-    "-f", "b[height<=480]/b[ext=mp4][height<=480]/worstvideo[height<=480]+bestaudio/w",
-    "--merge-output-format", "mp4",
-    "-o", targetFile,
-    "--no-playlist",
-    videoUrl
-  ], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-
-  const decoder = new TextDecoder();
-  let stderrText = "";
-  let stdoutText = "";
-
-  // Read stdout in background to parse progress and capture output
-  const readStdout = async () => {
-    try {
-      let buffer = "";
-      for await (const chunk of proc.stdout) {
-        const text = decoder.decode(chunk, { stream: true });
-        stdoutText += text;
-        buffer += text;
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-        for (const line of lines) {
-          const match = line.match(/\[download\]\s+([\d\.]+)%/i);
-          if (match && onProgress) {
-            const percent = Math.min(100, Math.max(0, parseFloat(match[1])));
-            const speedMatch = line.match(/at\s+([^\s]+)/i);
-            const etaMatch = line.match(/ETA\s+([^\s]+)/i);
-            onProgress({
-              percent,
-              speed: speedMatch ? speedMatch[1] : undefined,
-              eta: etaMatch ? etaMatch[1] : undefined,
-            });
-          }
-        }
-      }
-    } catch {
-      // Ignore stream reading errors if process ends early
-    }
-  };
-
-  const readStderr = async () => {
-    try {
-      for await (const chunk of proc.stderr) {
-        stderrText += decoder.decode(chunk, { stream: true });
-      }
-    } catch {
-      // Ignore stream reading errors
-    }
-  };
-
-  const stdoutPromise = readStdout();
-  const stderrPromise = readStderr();
-  const exitCode = await proc.exited;
-  await Promise.all([stdoutPromise, stderrPromise]);
-
-  const elapsedSecs = ((Date.now() - startTime) / 1000).toFixed(2);
-  
-  // Check exact targetFile or possible extensions written by yt-dlp
-  let actualFile = targetFile;
-  if (!existsSync(actualFile)) {
-    const candidates = [
-      `${targetFile}.webm`,
-      `${targetFile}.mkv`,
-      `${targetFile}.mp4`,
-      targetFile.replace(/\.mp4$/, ".webm"),
-      targetFile.replace(/\.mp4$/, ".mkv"),
-    ];
-    for (const cand of candidates) {
-      if (existsSync(cand)) {
-        actualFile = cand;
-        break;
-      }
-    }
-  }
-
-  const success = exitCode === 0 && existsSync(actualFile);
-
-  if (success) {
+  const cachedFile = getCachedSourceFile(targetFile);
+  if (cachedFile) {
+    logger.info("CACHE", `Cache hit for video "${videoId}": using cached asset "${cachedFile}"`, jobId);
     if (onProgress) {
       onProgress({ percent: 100 });
     }
-    logger.info("JOB", `Source video download completed in ${elapsedSecs}s`, jobId);
-    return { success: true, actualFile };
-  } else {
-    const rawError = stderrText.trim() || stdoutText.trim() || `Process exited with code ${exitCode} and output file was not created.`;
-    logger.error("JOB", `Source video download failed after ${elapsedSecs}s (exitCode: ${exitCode}) | Error: ${rawError}`, jobId);
-    
-    console.error(`\n================== [${jobId || "JOB"}] YT-DLP ERROR DETAILS ==================`);
-    console.error(`Exit Code: ${exitCode}`);
-    console.error(`Expected File: ${targetFile}`);
-    console.error(`Found File: ${existsSync(actualFile) ? actualFile : "None"}`);
-    if (stderrText.trim()) {
-      console.error(`\n--- [${jobId || "JOB"}] STDERR ---\n${stderrText.trim()}`);
-    }
-    if (stdoutText.trim()) {
-      console.error(`\n--- [${jobId || "JOB"}] STDOUT ---\n${stdoutText.trim()}`);
-    }
-    console.error(`=====================================================================\n`);
+    return { success: true, actualFile: cachedFile };
+  }
 
-    return {
-      success: false,
-      error: `Download error (code ${exitCode}): ${rawError.slice(-500)}`,
-      stderr: stderrText,
+  // If download for this videoId is already in flight, wait on the same promise
+  if (activeDownloads.has(videoId)) {
+    logger.info("CACHE", `Download already in progress for video "${videoId}", joining active task`, jobId);
+    const inFlightResult = await activeDownloads.get(videoId)!;
+    if (inFlightResult.success && onProgress) {
+      onProgress({ percent: 100 });
+    }
+    return inFlightResult;
+  }
+
+  const downloadPromise = (async (): Promise<DownloadResult> => {
+    const startTime = Date.now();
+    logger.info("JOB", `Starting source video download for videoId "${videoId}"`, jobId);
+    const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    
+    // Download video stream capped at 480p max height to optimize bandwidth and speed.
+    // Merging audio and video automatically uses host ffmpeg from PATH.
+    const proc = spawn([
+      "yt-dlp",
+      "--newline",
+      "-f", "b[height<=480]/b[ext=mp4][height<=480]/worstvideo[height<=480]+bestaudio/w",
+      "--merge-output-format", "mp4",
+      "-o", targetFile,
+      "--no-playlist",
+      videoUrl
+    ], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    const decoder = new TextDecoder();
+    let stderrText = "";
+    let stdoutText = "";
+
+    // Read stdout in background to parse progress and capture output
+    const readStdout = async () => {
+      try {
+        let buffer = "";
+        for await (const chunk of proc.stdout) {
+          const text = decoder.decode(chunk, { stream: true });
+          stdoutText += text;
+          buffer += text;
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            const match = line.match(/\[download\]\s+([\d\.]+)%/i);
+            if (match && onProgress) {
+              const percent = Math.min(100, Math.max(0, parseFloat(match[1])));
+              const speedMatch = line.match(/at\s+([^\s]+)/i);
+              const etaMatch = line.match(/ETA\s+([^\s]+)/i);
+              onProgress({
+                percent,
+                speed: speedMatch ? speedMatch[1] : undefined,
+                eta: etaMatch ? etaMatch[1] : undefined,
+              });
+            }
+          }
+        }
+      } catch {
+        // Ignore stream reading errors if process ends early
+      }
     };
+
+    const readStderr = async () => {
+      try {
+        for await (const chunk of proc.stderr) {
+          stderrText += decoder.decode(chunk, { stream: true });
+        }
+      } catch {
+        // Ignore stream reading errors
+      }
+    };
+
+    const stdoutPromise = readStdout();
+    const stderrPromise = readStderr();
+    const exitCode = await proc.exited;
+    await Promise.all([stdoutPromise, stderrPromise]);
+
+    const elapsedSecs = ((Date.now() - startTime) / 1000).toFixed(2);
+    
+    // Check exact targetFile or possible extensions written by yt-dlp
+    let actualFile = targetFile;
+    if (!existsSync(actualFile)) {
+      const candidates = [
+        `${targetFile}.webm`,
+        `${targetFile}.mkv`,
+        `${targetFile}.mp4`,
+        targetFile.replace(/\.mp4$/, ".webm"),
+        targetFile.replace(/\.mp4$/, ".mkv"),
+      ];
+      for (const cand of candidates) {
+        if (existsSync(cand)) {
+          actualFile = cand;
+          break;
+        }
+      }
+    }
+
+    const success = exitCode === 0 && existsSync(actualFile);
+
+    if (success) {
+      if (onProgress) {
+        onProgress({ percent: 100 });
+      }
+      logger.info("JOB", `Source video download completed in ${elapsedSecs}s`, jobId);
+      return { success: true, actualFile };
+    } else {
+      const rawError = stderrText.trim() || stdoutText.trim() || `Process exited with code ${exitCode} and output file was not created.`;
+      logger.error("JOB", `Source video download failed after ${elapsedSecs}s (exitCode: ${exitCode}) | Error: ${rawError}`, jobId);
+      
+      console.error(`\n================== [${jobId || "JOB"}] YT-DLP ERROR DETAILS ==================`);
+      console.error(`Exit Code: ${exitCode}`);
+      console.error(`Expected File: ${targetFile}`);
+      console.error(`Found File: ${existsSync(actualFile) ? actualFile : "None"}`);
+      if (stderrText.trim()) {
+        console.error(`\n--- [${jobId || "JOB"}] STDERR ---\n${stderrText.trim()}`);
+      }
+      if (stdoutText.trim()) {
+        console.error(`\n--- [${jobId || "JOB"}] STDOUT ---\n${stdoutText.trim()}`);
+      }
+      console.error(`=====================================================================\n`);
+
+      return {
+        success: false,
+        error: `Download error (code ${exitCode}): ${rawError.slice(-500)}`,
+        stderr: stderrText,
+      };
+    }
+  })();
+
+  activeDownloads.set(videoId, downloadPromise);
+  try {
+    return await downloadPromise;
+  } finally {
+    activeDownloads.delete(videoId);
   }
 }

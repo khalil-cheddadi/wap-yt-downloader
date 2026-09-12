@@ -209,7 +209,7 @@ export function getJob(id: string): ConversionJob | undefined {
 }
 
 async function processJob(job: ConversionJob, jobLogId: string) {
-  const tempFile = join(TEMP_DIR, `${job.id}_src.mp4`);
+  const tempFile = join(TEMP_DIR, `video_${job.videoId}_src.mp4`);
   const isMp3 = job.format === "mp3" || job.format === "mp3_low" || job.format === "mp3_high";
   const ext = isMp3 ? "mp3" : "3gp";
   const safeTitle = sanitizeFilename(job.title);
@@ -422,23 +422,73 @@ async function processJob(job: ConversionJob, jobLogId: string) {
     }
     console.error(`=====================================================================\n`);
   } finally {
-    // Clean up temporary downloaded video source files and any fragments
-    try {
-      if (existsSync(TEMP_DIR)) {
-        const prefix = `${job.id}_src`;
-        const tempFiles = readdirSync(TEMP_DIR);
-        for (const file of tempFiles) {
-          if (file.startsWith(prefix)) {
-            try { unlinkSync(join(TEMP_DIR, file)); } catch { }
+    // If the job failed, clean up any unfinished partial files (.part, .ytdl, .tmp)
+    if (job.status === "error") {
+      try {
+        if (existsSync(TEMP_DIR)) {
+          const prefix = `video_${job.videoId}_src`;
+          const tempFiles = readdirSync(TEMP_DIR);
+          for (const file of tempFiles) {
+            if (file.startsWith(prefix) && (file.endsWith(".part") || file.endsWith(".ytdl") || file.endsWith(".tmp"))) {
+              try { unlinkSync(join(TEMP_DIR, file)); } catch { }
+            }
           }
         }
-      }
-    } catch { }
+      } catch { }
+    }
   }
 }
 
-const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
-const MAX_FILE_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+export const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+export const MAX_FILE_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+export let MAX_TEMP_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+export function setCleanupConfig(config: { maxTempAgeMs?: number; maxFileAgeMs?: number }) {
+  if (config.maxTempAgeMs !== undefined) MAX_TEMP_AGE_MS = config.maxTempAgeMs;
+}
+
+export function purgeTempDir(maxAgeMs: number = MAX_TEMP_AGE_MS): { deleted: number; checked: number } {
+  let checked = 0;
+  let deleted = 0;
+  if (!existsSync(TEMP_DIR)) return { deleted, checked };
+
+  const now = Date.now();
+  // Get active videoIds being processed so we never delete an active source file
+  const activeVideoIds = new Set<string>();
+  for (const job of jobsMap.values()) {
+    if (job.status === "downloading" || job.status === "converting" || job.status === "queued" || job.status === "pending") {
+      activeVideoIds.add(job.videoId);
+    }
+  }
+
+  try {
+    const files = readdirSync(TEMP_DIR);
+    for (const f of files) {
+      if (f.startsWith(".")) continue;
+      checked++;
+      const filePath = join(TEMP_DIR, f);
+      try {
+        const stat = statSync(filePath);
+        if (stat.isDirectory()) continue;
+
+        // Clean up partial fragments older than 5 minutes
+        const isPartial = f.endsWith(".part") || f.endsWith(".ytdl") || f.endsWith(".tmp");
+        const threshold = isPartial ? 5 * 60 * 1000 : maxAgeMs;
+
+        // Check if file is associated with currently active job
+        const isActive = Array.from(activeVideoIds).some((vId) => f.includes(vId));
+        if (!isActive && now - stat.mtimeMs > threshold) {
+          unlinkSync(filePath);
+          deleted++;
+        }
+      } catch { }
+    }
+  } catch (err: any) {
+    logger.error("MEDIA", `Error purging temp directory: ${err.message || err}`);
+  }
+
+  return { deleted, checked };
+}
 
 let nextCleanupTime = Date.now() + CLEANUP_INTERVAL_MS;
 
@@ -490,22 +540,8 @@ export function runCleanup() {
       }
     }
 
-    // Also clean up old temporary files in downloads/temp
-    if (existsSync(TEMP_DIR)) {
-      const tempFiles = readdirSync(TEMP_DIR);
-      for (const f of tempFiles) {
-        if (f.startsWith(".")) continue;
-        checkedFiles++;
-        const path = join(TEMP_DIR, f);
-        try {
-          const stat = statSync(path);
-          if (now - stat.mtimeMs > CLEANUP_INTERVAL_MS) {
-            unlinkSync(path);
-            deletedFiles++;
-          }
-        } catch { }
-      }
-    }
+    // Purge expired and temporary files from TEMP_DIR
+    const tempPurge = purgeTempDir(MAX_TEMP_AGE_MS);
 
     // Clean up old jobs from memory
     let deletedJobs = 0;
@@ -517,8 +553,10 @@ export function runCleanup() {
     }
 
     logger.info("MEDIA", `Background cleanup sweep completed`, undefined, {
-      "Checked Files": checkedFiles,
-      "Deleted Expired Files": deletedFiles,
+      "Checked Downloads": checkedFiles,
+      "Deleted Expired Downloads": deletedFiles,
+      "Checked Temp Files": tempPurge.checked,
+      "Purged Temp Files": tempPurge.deleted,
       "Cleaned Jobs": deletedJobs,
     });
   } catch (err: any) {

@@ -1,6 +1,9 @@
-import { describe, expect, it } from "bun:test";
-import { formatViewCount, formatUploadDate, YouTubeSearchResult } from "./ytdlp";
+import { describe, expect, it, afterEach } from "bun:test";
+import { formatViewCount, formatUploadDate, YouTubeSearchResult, getCachedSourceFile, downloadSourceVideo } from "./ytdlp";
 import { renderSearchResults } from "./views";
+import { writeFileSync, unlinkSync, existsSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 
 describe("formatViewCount", () => {
   it("handles undefined, null, and NaN", () => {
@@ -135,3 +138,59 @@ describe("renderSearchResults", () => {
     expect(html).toContain("Uploaded: 2023-11-20");
   });
 });
+
+describe("getCachedSourceFile and downloadSourceVideo caching", () => {
+  const testFiles: string[] = [];
+
+  afterEach(() => {
+    for (const f of testFiles) {
+      try {
+        if (existsSync(f)) unlinkSync(f);
+      } catch { }
+    }
+    testFiles.length = 0;
+  });
+
+  it("returns null when file does not exist", () => {
+    const nonExistent = join(tmpdir(), `test_missing_${Date.now()}.mp4`);
+    expect(getCachedSourceFile(nonExistent)).toBeNull();
+  });
+
+  it("returns null when file exists but size is 0", () => {
+    const emptyFile = join(tmpdir(), `test_empty_${Date.now()}.mp4`);
+    testFiles.push(emptyFile);
+    writeFileSync(emptyFile, "");
+    expect(getCachedSourceFile(emptyFile)).toBeNull();
+  });
+
+  it("returns file path when non-empty file exists", () => {
+    const validFile = join(tmpdir(), `test_valid_${Date.now()}.mp4`);
+    testFiles.push(validFile);
+    writeFileSync(validFile, "dummy video content");
+    expect(getCachedSourceFile(validFile)).toBe(validFile);
+  });
+
+  it("detects alternate extension (e.g. .webm or .mkv)", () => {
+    const baseFile = join(tmpdir(), `test_candidate_${Date.now()}.mp4`);
+    const webmFile = baseFile.replace(/\.mp4$/, ".webm");
+    testFiles.push(webmFile);
+    writeFileSync(webmFile, "dummy webm content");
+    expect(getCachedSourceFile(baseFile)).toBe(webmFile);
+  });
+
+  it("downloadSourceVideo returns cached file immediately without spawning yt-dlp", async () => {
+    const cachedFile = join(tmpdir(), `test_cached_${Date.now()}.mp4`);
+    testFiles.push(cachedFile);
+    writeFileSync(cachedFile, "already downloaded video data");
+
+    let progressReported = 0;
+    const result = await downloadSourceVideo("dummyId", cachedFile, (p) => {
+      progressReported = p.percent;
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.actualFile).toBe(cachedFile);
+    expect(progressReported).toBe(100);
+  });
+});
+

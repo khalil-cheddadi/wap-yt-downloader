@@ -38,3 +38,56 @@ describe("getFormatLabel", () => {
     expect(getFormatLabel("mp3_high")).toBe("MP3 High (320k)");
   });
 });
+
+describe("purgeTempDir", () => {
+  it("purges expired files while keeping fresh files", async () => {
+    const { purgeTempDir } = await import("./converter");
+    const { join } = await import("path");
+    const { writeFileSync, existsSync, utimesSync, unlinkSync } = await import("fs");
+
+    const tempDir = join(import.meta.dir, "..", "downloads", "temp");
+    const oldFile = join(tempDir, `test_old_${Date.now()}.mp4`);
+    const freshFile = join(tempDir, `test_fresh_${Date.now()}.mp4`);
+
+    try {
+      writeFileSync(oldFile, "old dummy data");
+      writeFileSync(freshFile, "fresh dummy data");
+
+      // Set oldFile mtime to 3 hours ago
+      const threeHoursAgo = (Date.now() - 3 * 60 * 60 * 1000) / 1000;
+      utimesSync(oldFile, threeHoursAgo, threeHoursAgo);
+
+      const res = purgeTempDir(2 * 60 * 60 * 1000); // 2 hours TTL
+
+      expect(existsSync(oldFile)).toBe(false);
+      expect(existsSync(freshFile)).toBe(true);
+      expect(res.deleted).toBeGreaterThanOrEqual(1);
+    } finally {
+      try { if (existsSync(oldFile)) unlinkSync(oldFile); } catch { }
+      try { if (existsSync(freshFile)) unlinkSync(freshFile); } catch { }
+    }
+  });
+
+  it("purges stale partial files (.part, .ytdl, .tmp)", async () => {
+    const { purgeTempDir } = await import("./converter");
+    const { join } = await import("path");
+    const { writeFileSync, existsSync, utimesSync, unlinkSync } = await import("fs");
+
+    const tempDir = join(import.meta.dir, "..", "downloads", "temp");
+    const partFile = join(tempDir, `test_partial_${Date.now()}.part`);
+
+    try {
+      writeFileSync(partFile, "partial data");
+      // Set partFile mtime to 10 minutes ago
+      const tenMinsAgo = (Date.now() - 10 * 60 * 1000) / 1000;
+      utimesSync(partFile, tenMinsAgo, tenMinsAgo);
+
+      purgeTempDir(2 * 60 * 60 * 1000);
+
+      expect(existsSync(partFile)).toBe(false);
+    } finally {
+      try { if (existsSync(partFile)) unlinkSync(partFile); } catch { }
+    }
+  });
+});
+
