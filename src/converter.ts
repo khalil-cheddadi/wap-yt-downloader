@@ -4,7 +4,7 @@ import { join } from "path";
 import { downloadSourceVideo } from "./ytdlp";
 import { logger } from "./logger";
 
-export type FormatType = "mp3" | "mp3_low" | "mp3_high" | "3gp_qcif" | "3gp_qvga" | "3gp_low" | "3gp_high";
+export type FormatType = "mp3" | "mp3_low" | "mp3_high" | "3gp_360p" | "3gp_480p" | "3gp_qcif" | "3gp_qvga" | "3gp_low" | "3gp_high";
 
 export interface JobProgress {
   percent: number;
@@ -112,6 +112,10 @@ export function estimateSize(durationSeconds: number, format: FormatType): strin
     bytesPerSec = (128 * 1000) / 8;
   } else if (format === "mp3_high") {
     bytesPerSec = (320 * 1000) / 8;
+  } else if (format === "3gp_360p") {
+    bytesPerSec = ((450 + 64) * 1000) / 8;
+  } else if (format === "3gp_480p") {
+    bytesPerSec = ((800 + 96) * 1000) / 8;
   } else if (format === "3gp_qcif" || format === "3gp_low") {
     bytesPerSec = ((128 + 12.2) * 1000) / 8;
   } else if (format === "3gp_qvga" || format === "3gp_high") {
@@ -128,6 +132,10 @@ export function getFormatLabel(format: FormatType): string {
       return "MP3 Low (128k)";
     case "mp3_high":
       return "MP3 High (320k)";
+    case "3gp_360p":
+      return "3GP 360p";
+    case "3gp_480p":
+      return "3GP 480p";
     case "3gp_qcif":
     case "3gp_low":
       return "3GP Low (176x144)";
@@ -257,6 +265,36 @@ async function processJob(job: ConversionJob, jobLogId: string) {
         "-c:a", "libmp3lame",
         "-b:a", "320k",
         "-ar", "44100",
+        outputFile
+      ];
+    } else if (job.format === "3gp_360p") {
+      // 360p, MPEG4 video, AAC audio
+      ffmpegArgs = [
+        ffmpeg, "-y",
+        "-progress", "pipe:1", "-nostats",
+        "-i", sourceVideoFile,
+        "-vf", "scale=-2:360",
+        "-c:v", "mpeg4",
+        "-b:v", "450k",
+        "-r", "24",
+        "-c:a", "aac",
+        "-ar", "44100",
+        "-b:a", "64k",
+        outputFile
+      ];
+    } else if (job.format === "3gp_480p") {
+      // 480p, MPEG4 video, AAC audio
+      ffmpegArgs = [
+        ffmpeg, "-y",
+        "-progress", "pipe:1", "-nostats",
+        "-i", sourceVideoFile,
+        "-vf", "scale=-2:480",
+        "-c:v", "mpeg4",
+        "-b:v", "800k",
+        "-r", "24",
+        "-c:a", "aac",
+        "-ar", "44100",
+        "-b:a", "96k",
         outputFile
       ];
     } else if (job.format === "3gp_qcif" || job.format === "3gp_low") {

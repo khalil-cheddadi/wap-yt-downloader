@@ -78,6 +78,10 @@ describe("renderSearchResults", () => {
     expect(html).toContain("Channel: Test Channel");
     expect(html).toContain("Duration: 3:45");
     expect(html).toContain("Uploaded: 2021-06-15");
+    expect(html).toContain("format=3gp_360p");
+    expect(html).toContain("3GP 360p");
+    expect(html).toContain("format=3gp_480p");
+    expect(html).toContain("3GP 480p");
   });
 
   it("renders Unknown views and upload date when not provided", () => {

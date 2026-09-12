@@ -185,12 +185,12 @@ export async function downloadSourceVideo(
   logger.info("JOB", `Starting source video download for videoId "${videoId}"`, jobId);
   const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
   
-  // Download video stream capped at 360p max height to optimize bandwidth and speed.
+  // Download video stream capped at 480p max height to optimize bandwidth and speed.
   // Merging audio and video automatically uses host ffmpeg from PATH.
   const proc = spawn([
     "yt-dlp",
     "--newline",
-    "-f", "b[height<=360]/b[ext=mp4][height<=360]/worstvideo[height<=360]+bestaudio/w",
+    "-f", "b[height<=480]/b[ext=mp4][height<=480]/worstvideo[height<=480]+bestaudio/w",
     "--merge-output-format", "mp4",
     "-o", targetFile,
     "--no-playlist",

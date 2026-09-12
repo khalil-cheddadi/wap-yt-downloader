@@ -57,7 +57,7 @@ export function renderHome(showThumbnails = false): string {
     <legend><strong>Supported Formats</strong></legend>
     <ul>
       <li><strong>Audio:</strong> MP3 Low (128k), MP3 High (320k)</li>
-      <li><strong>Video:</strong> 3GP Low (176x144 QCIF), 3GP High (320x240 QVGA)</li>
+      <li><strong>Video:</strong> 3GP 360p, 3GP 480p</li>
     </ul>
   </fieldset>`;
 
@@ -202,8 +202,8 @@ export function renderSearchResults(query: string, searchData: PaginatedSearchRe
         <strong>Download Options:</strong><br />
         &bull; <a href="/convert?id=${escapeHtml(item.id)}&title=${encodeURIComponent(item.title)}&format=mp3_low&duration=${item.durationSeconds}"><strong>[ MP3 Low 128k (${estimateSize(item.durationSeconds, "mp3_low")}) ]</strong></a><br />
         &bull; <a href="/convert?id=${escapeHtml(item.id)}&title=${encodeURIComponent(item.title)}&format=mp3_high&duration=${item.durationSeconds}"><strong>[ MP3 High 320k (${estimateSize(item.durationSeconds, "mp3_high")}) ]</strong></a><br />
-        &bull; <a href="/convert?id=${escapeHtml(item.id)}&title=${encodeURIComponent(item.title)}&format=3gp_low&duration=${item.durationSeconds}"><strong>[ 3GP Low 176x144 (${estimateSize(item.durationSeconds, "3gp_low")}) ]</strong></a><br />
-        &bull; <a href="/convert?id=${escapeHtml(item.id)}&title=${encodeURIComponent(item.title)}&format=3gp_high&duration=${item.durationSeconds}"><strong>[ 3GP High 320x240 (${estimateSize(item.durationSeconds, "3gp_high")}) ]</strong></a>
+        &bull; <a href="/convert?id=${escapeHtml(item.id)}&title=${encodeURIComponent(item.title)}&format=3gp_360p&duration=${item.durationSeconds}"><strong>[ 3GP 360p (${estimateSize(item.durationSeconds, "3gp_360p")}) ]</strong></a><br />
+        &bull; <a href="/convert?id=${escapeHtml(item.id)}&title=${encodeURIComponent(item.title)}&format=3gp_480p&duration=${item.durationSeconds}"><strong>[ 3GP 480p (${estimateSize(item.durationSeconds, "3gp_480p")}) ]</strong></a>
       </p>
     </fieldset>`;
     }).join("");
