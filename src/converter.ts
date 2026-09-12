@@ -213,7 +213,7 @@ async function processJob(job: ConversionJob, jobLogId: string) {
     logger.info("JOB", "Transition status: pending -> downloading", jobLogId);
     job.status = "downloading";
     job.downloadProgress = { percent: 0 };
-    const downloadOk = await downloadSourceVideo(
+    const downloadRes = await downloadSourceVideo(
       job.videoId,
       tempFile,
       (p) => {
@@ -225,20 +225,23 @@ async function processJob(job: ConversionJob, jobLogId: string) {
       },
       jobLogId
     );
-    if (!downloadOk) {
-      throw new Error("Failed to download video stream from YouTube.");
+    if (!downloadRes.success) {
+      throw new Error(downloadRes.error || "Failed to download video stream from YouTube.");
     }
+
+    const sourceVideoFile = downloadRes.actualFile || tempFile;
 
     logger.info("JOB", "Transition status: downloading -> converting", jobLogId);
     job.status = "converting";
     job.conversionProgress = { percent: 0 };
+    const ffmpeg = "ffmpeg";
     let ffmpegArgs: string[] = [];
 
     if (job.format === "mp3" || job.format === "mp3_low") {
       ffmpegArgs = [
-        "ffmpeg", "-y",
+        ffmpeg, "-y",
         "-progress", "pipe:1", "-nostats",
-        "-i", tempFile,
+        "-i", sourceVideoFile,
         "-vn",
         "-c:a", "libmp3lame",
         "-b:a", "128k",
@@ -247,9 +250,9 @@ async function processJob(job: ConversionJob, jobLogId: string) {
       ];
     } else if (job.format === "mp3_high") {
       ffmpegArgs = [
-        "ffmpeg", "-y",
+        ffmpeg, "-y",
         "-progress", "pipe:1", "-nostats",
-        "-i", tempFile,
+        "-i", sourceVideoFile,
         "-vn",
         "-c:a", "libmp3lame",
         "-b:a", "320k",
@@ -259,9 +262,9 @@ async function processJob(job: ConversionJob, jobLogId: string) {
     } else if (job.format === "3gp_qcif" || job.format === "3gp_low") {
       // 176x144 QCIF, H.263 video, AMR audio (Ideal for Starlight M203 and 2G dumb phones)
       ffmpegArgs = [
-        "ffmpeg", "-y",
+        ffmpeg, "-y",
         "-progress", "pipe:1", "-nostats",
-        "-i", tempFile,
+        "-i", sourceVideoFile,
         "-vf", "scale=176:144:force_original_aspect_ratio=decrease,pad=176:144:(ow-iw)/2:(oh-ih)/2",
         "-c:v", "h263",
         "-b:v", "128k",
@@ -275,9 +278,9 @@ async function processJob(job: ConversionJob, jobLogId: string) {
     } else if (job.format === "3gp_qvga" || job.format === "3gp_high") {
       // 320x240 QVGA, MPEG4 video, AAC audio
       ffmpegArgs = [
-        "ffmpeg", "-y",
+        ffmpeg, "-y",
         "-progress", "pipe:1", "-nostats",
-        "-i", tempFile,
+        "-i", sourceVideoFile,
         "-vf", "scale=320:240:force_original_aspect_ratio=decrease,pad=320:240:(ow-iw)/2:(oh-ih)/2",
         "-c:v", "mpeg4",
         "-b:v", "256k",
@@ -346,7 +349,15 @@ async function processJob(job: ConversionJob, jobLogId: string) {
 
     if (exitCode !== 0 || !existsSync(outputFile)) {
       const errText = await new Response(proc.stderr).text();
-      throw new Error(`FFmpeg error (code ${exitCode}): ${errText.slice(-200)}`);
+      console.error(`\n================== [${jobLogId}] FFMPEG ERROR DETAILS ==================`);
+      console.error(`Exit Code: ${exitCode}`);
+      console.error(`Target File: ${outputFile}`);
+      console.error(`Output File Exists: ${existsSync(outputFile)}`);
+      if (errText.trim()) {
+        console.error(`\n--- STDERR ---\n${errText.trim()}`);
+      }
+      console.error(`=======================================================================\n`);
+      throw new Error(`FFmpeg error (code ${exitCode}): ${errText.trim().slice(-300) || "Process failed or file missing"}`);
     }
 
     job.conversionProgress = { percent: 100, speed: "100%" };
@@ -366,11 +377,25 @@ async function processJob(job: ConversionJob, jobLogId: string) {
     job.status = "error";
     job.error = err.message || "Conversion failed";
     logger.error("JOB", `Transition status: -> error | Reason: ${job.error}`, jobLogId);
-  } finally {
-    // Clean up temporary downloaded video source
-    if (existsSync(tempFile)) {
-      try { unlinkSync(tempFile); } catch {}
+    console.error(`\n================== [${jobLogId}] CONVERSION FAILURE ==================`);
+    console.error(`Error: ${job.error}`);
+    if (err.stack) {
+      console.error(`Stack trace:\n${err.stack}`);
     }
+    console.error(`=====================================================================\n`);
+  } finally {
+    // Clean up temporary downloaded video source files and any fragments
+    try {
+      if (existsSync(TEMP_DIR)) {
+        const prefix = `${job.id}_src`;
+        const tempFiles = readdirSync(TEMP_DIR);
+        for (const file of tempFiles) {
+          if (file.startsWith(prefix)) {
+            try { unlinkSync(join(TEMP_DIR, file)); } catch { }
+          }
+        }
+      }
+    } catch { }
   }
 }
 
@@ -424,6 +449,23 @@ export function runCleanup() {
       if (now - stat.mtimeMs > MAX_FILE_AGE_MS) {
         unlinkSync(path);
         deletedFiles++;
+      }
+    }
+
+    // Also clean up old temporary files in downloads/temp
+    if (existsSync(TEMP_DIR)) {
+      const tempFiles = readdirSync(TEMP_DIR);
+      for (const f of tempFiles) {
+        if (f.startsWith(".")) continue;
+        checkedFiles++;
+        const path = join(TEMP_DIR, f);
+        try {
+          const stat = statSync(path);
+          if (now - stat.mtimeMs > CLEANUP_INTERVAL_MS) {
+            unlinkSync(path);
+            deletedFiles++;
+          }
+        } catch { }
       }
     }
 

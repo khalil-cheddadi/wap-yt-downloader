@@ -12,14 +12,35 @@ export interface YouTubeSearchResult {
   thumbnailUrl: string;
 }
 
-const BIN_DIR = join(import.meta.dir, "..", "bin");
-const LOCAL_YTDLP = join(BIN_DIR, "yt-dlp");
+export function ensureHostDependencies(): void {
+  const ytdlpPath = Bun.which("yt-dlp");
+  const ffmpegPath = Bun.which("ffmpeg");
 
-function getYtDlpPath(): string {
-  if (existsSync(LOCAL_YTDLP)) {
-    return LOCAL_YTDLP;
+  if (!ytdlpPath || !ffmpegPath) {
+    const lines = [
+      "",
+      "==========================================================================",
+      " [FATAL ERROR] Required system dependencies are missing on the host!",
+      "==========================================================================",
+      "",
+      `  • yt-dlp : ${ytdlpPath ? `FOUND (${ytdlpPath})` : "MISSING (not found in PATH)"}`,
+      `  • ffmpeg : ${ffmpegPath ? `FOUND (${ffmpegPath})` : "MISSING (not found in PATH)"}`,
+      "",
+      " This application requires both 'yt-dlp' and 'ffmpeg' installed on the host.",
+      "",
+      " To install them, run the appropriate command for your OS:",
+      "   • Arch Linux:      sudo pacman -S yt-dlp ffmpeg",
+      "   • Ubuntu / Debian: sudo apt update && sudo apt install yt-dlp ffmpeg",
+      "   • Fedora:          sudo dnf install yt-dlp ffmpeg",
+      "   • macOS:           brew install yt-dlp ffmpeg",
+      "   • Windows:         winget install yt-dlp Gyan.FFmpeg",
+      "",
+      "==========================================================================",
+      "",
+    ];
+    console.error(lines.join("\n"));
+    process.exit(1);
   }
-  return "yt-dlp"; // fallback to system command
 }
 
 export function formatDuration(seconds: number | undefined): string {
@@ -39,17 +60,23 @@ export interface PaginatedSearchResults {
 export async function searchYouTube(query: string, page = 1, pageSize = 5, reqId?: string): Promise<PaginatedSearchResults> {
   const startTime = Date.now();
   logger.info("SEARCH", `Executing YouTube search | Query: "${query}" | Page: ${page}`, reqId);
-  const ytdlp = getYtDlpPath();
   const fetchLimit = page * pageSize + 1;
   const searchSpec = `ytsearch${fetchLimit}:${query}`;
   
-  const proc = spawn([ytdlp, searchSpec, "-j", "--flat-playlist", "--no-warnings"], {
+  const proc = spawn(["yt-dlp", searchSpec, "-j", "--flat-playlist", "--no-warnings"], {
     stdout: "pipe",
     stderr: "pipe",
   });
 
-  const output = await new Response(proc.stdout).text();
-  await proc.exited;
+  const [output, errOutput] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
+  const exitCode = await proc.exited;
+
+  if (exitCode !== 0 && errOutput.trim()) {
+    logger.warn("SEARCH", `Search warning/error (code ${exitCode}): ${errOutput.trim()}`, reqId);
+  }
 
   const allResults: YouTubeSearchResult[] = [];
   const lines = output.trim().split("\n");
@@ -96,38 +123,50 @@ export interface ProgressData {
   eta?: string;
 }
 
+export interface DownloadResult {
+  success: boolean;
+  actualFile?: string;
+  error?: string;
+  stderr?: string;
+}
+
 export async function downloadSourceVideo(
   videoId: string,
   targetFile: string,
   onProgress?: (progress: ProgressData) => void,
   jobId?: string
-): Promise<boolean> {
+): Promise<DownloadResult> {
   const startTime = Date.now();
   logger.info("JOB", `Starting source video download for videoId "${videoId}"`, jobId);
-  const ytdlp = getYtDlpPath();
   const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
   
-  // Download video stream capped at 360p max height to optimize bandwidth and speed
+  // Download video stream capped at 360p max height to optimize bandwidth and speed.
+  // Merging audio and video automatically uses host ffmpeg from PATH.
   const proc = spawn([
-    ytdlp,
+    "yt-dlp",
     "--newline",
     "-f", "b[height<=360]/b[ext=mp4][height<=360]/worstvideo[height<=360]+bestaudio/w",
+    "--merge-output-format", "mp4",
     "-o", targetFile,
     "--no-playlist",
-    "--no-warnings",
     videoUrl
   ], {
     stdout: "pipe",
     stderr: "pipe",
   });
 
-  // Read stdout in background to parse progress
+  const decoder = new TextDecoder();
+  let stderrText = "";
+  let stdoutText = "";
+
+  // Read stdout in background to parse progress and capture output
   const readStdout = async () => {
     try {
-      const decoder = new TextDecoder();
       let buffer = "";
       for await (const chunk of proc.stdout) {
-        buffer += decoder.decode(chunk, { stream: true });
+        const text = decoder.decode(chunk, { stream: true });
+        stdoutText += text;
+        buffer += text;
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
         for (const line of lines) {
@@ -149,21 +188,69 @@ export async function downloadSourceVideo(
     }
   };
 
+  const readStderr = async () => {
+    try {
+      for await (const chunk of proc.stderr) {
+        stderrText += decoder.decode(chunk, { stream: true });
+      }
+    } catch {
+      // Ignore stream reading errors
+    }
+  };
+
   const stdoutPromise = readStdout();
+  const stderrPromise = readStderr();
   const exitCode = await proc.exited;
-  await stdoutPromise;
+  await Promise.all([stdoutPromise, stderrPromise]);
 
   const elapsedSecs = ((Date.now() - startTime) / 1000).toFixed(2);
-  const success = exitCode === 0 && existsSync(targetFile);
+  
+  // Check exact targetFile or possible extensions written by yt-dlp
+  let actualFile = targetFile;
+  if (!existsSync(actualFile)) {
+    const candidates = [
+      `${targetFile}.webm`,
+      `${targetFile}.mkv`,
+      `${targetFile}.mp4`,
+      targetFile.replace(/\.mp4$/, ".webm"),
+      targetFile.replace(/\.mp4$/, ".mkv"),
+    ];
+    for (const cand of candidates) {
+      if (existsSync(cand)) {
+        actualFile = cand;
+        break;
+      }
+    }
+  }
+
+  const success = exitCode === 0 && existsSync(actualFile);
 
   if (success) {
     if (onProgress) {
       onProgress({ percent: 100 });
     }
     logger.info("JOB", `Source video download completed in ${elapsedSecs}s`, jobId);
+    return { success: true, actualFile };
   } else {
-    logger.error("JOB", `Source video download failed after ${elapsedSecs}s (exitCode: ${exitCode})`, jobId);
-  }
+    const rawError = stderrText.trim() || stdoutText.trim() || `Process exited with code ${exitCode} and output file was not created.`;
+    logger.error("JOB", `Source video download failed after ${elapsedSecs}s (exitCode: ${exitCode}) | Error: ${rawError}`, jobId);
+    
+    console.error(`\n================== [${jobId || "JOB"}] YT-DLP ERROR DETAILS ==================`);
+    console.error(`Exit Code: ${exitCode}`);
+    console.error(`Expected File: ${targetFile}`);
+    console.error(`Found File: ${existsSync(actualFile) ? actualFile : "None"}`);
+    if (stderrText.trim()) {
+      console.error(`\n--- [${jobId || "JOB"}] STDERR ---\n${stderrText.trim()}`);
+    }
+    if (stdoutText.trim()) {
+      console.error(`\n--- [${jobId || "JOB"}] STDOUT ---\n${stdoutText.trim()}`);
+    }
+    console.error(`=====================================================================\n`);
 
-  return success;
+    return {
+      success: false,
+      error: `Download error (code ${exitCode}): ${rawError.slice(-500)}`,
+      stderr: stderrText,
+    };
+  }
 }

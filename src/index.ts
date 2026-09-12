@@ -1,9 +1,12 @@
 import { createJob, getJob, FormatType, getAvailableDownloads, getNextCleanupInfo, getActiveAndQueuedJobs } from "./converter";
-import { searchYouTube } from "./ytdlp";
+import { searchYouTube, ensureHostDependencies } from "./ytdlp";
 import { renderError, renderHome, renderSearchResults, renderStatus, renderDownloadsList } from "./views";
 import { join, resolve, relative, isAbsolute } from "path";
 import { existsSync, statSync } from "fs";
 import { logger, generateReqId } from "./logger";
+
+// Verify system dependencies before starting (fails fast if yt-dlp or ffmpeg is missing)
+ensureHostDependencies();
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 const DOWNLOADS_DIR = join(import.meta.dir, "..", "downloads");
