@@ -6,18 +6,19 @@ import { existsSync, statSync } from "fs";
 import { logger, generateReqId } from "./logger";
 
 // Verify system dependencies before starting (fails fast if yt-dlp or ffmpeg is missing)
-ensureHostDependencies();
-
-// Clean up any stale temporary files from prior interrupted runs
-purgeTempDir();
+if (import.meta.main) {
+  ensureHostDependencies();
+  // Clean up any stale temporary files from prior interrupted runs
+  purgeTempDir();
+}
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 const DOWNLOADS_DIR = join(import.meta.dir, "..", "downloads");
 
-const server = Bun.serve({
+const app = {
   port: PORT,
   idleTimeout: 255, // Max allowed by Bun. Data transfer keeps connection alive anyway.
-  async fetch(req) {
+  async fetch(req: Request, server?: any) {
     const startTime = Date.now();
     const reqId = generateReqId();
     const url = new URL(req.url);
@@ -28,7 +29,7 @@ const server = Bun.serve({
 
     let res: Response;
     try {
-      res = await handleRoute(req, url, path, reqId);
+      res = await handleRoute(req, url, path, reqId, server);
     } catch (err: any) {
       logger.error("HTTP", `Unhandled route error: ${err.message || err}`, reqId);
       res = new Response(renderError(err.message || "Internal server error"), {
@@ -41,11 +42,16 @@ const server = Bun.serve({
     logger.httpOut(reqId, req.method, path, res.status, durationMs);
     return res;
   },
-});
+};
 
-logger.info("SERVER", `Server running at http://localhost:${server.port}`);
+if (import.meta.main) {
+  const server = Bun.serve(app);
+  logger.info("SERVER", `Server running at http://localhost:${server.port}`);
+}
 
-function parseCookie(cookieHeader: string | null, name: string): string | null {
+export default app;
+
+export function parseCookie(cookieHeader: string | null, name: string): string | null {
   if (!cookieHeader) return null;
   const cookies = cookieHeader.split(";");
   for (const cookie of cookies) {
@@ -55,7 +61,7 @@ function parseCookie(cookieHeader: string | null, name: string): string | null {
   return null;
 }
 
-async function handleRoute(req: Request, url: URL, path: string, reqId: string): Promise<Response> {
+export async function handleRoute(req: Request, url: URL, path: string, reqId: string, server?: any): Promise<Response> {
   // Serve favicon
   if (path === "/favicon.ico") {
     const faviconPath = join(import.meta.dir, "favicon.ico");
@@ -141,7 +147,7 @@ function getClientIp(req: Request, server: any): string {
   if (realIp && realIp.trim()) {
     return realIp.trim();
   }
-  const ip = server.requestIP(req);
+  const ip = server?.requestIP?.(req);
   return ip?.address || "127.0.0.1";
 }
 

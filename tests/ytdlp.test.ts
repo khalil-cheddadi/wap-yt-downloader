@@ -1,6 +1,6 @@
 import { describe, expect, it, afterEach } from "bun:test";
-import { formatViewCount, formatUploadDate, YouTubeSearchResult, getCachedSourceFile, downloadSourceVideo } from "./ytdlp";
-import { renderSearchResults } from "./views";
+import { formatViewCount, formatUploadDate, YouTubeSearchResult, getCachedSourceFile, downloadSourceVideo } from "../src/ytdlp";
+import { renderSearchResults } from "../src/views";
 import { writeFileSync, unlinkSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";

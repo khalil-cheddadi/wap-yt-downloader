@@ -1,5 +1,5 @@
 export type LogLevel = "INFO" | "WARN" | "ERROR";
-export type LogCategory = "SERVER" | "HTTP" | "SEARCH" | "JOB" | "MEDIA";
+export type LogCategory = "SERVER" | "HTTP" | "SEARCH" | "JOB" | "MEDIA" | "QUEUE";
 
 let activeConnections = 0;
 

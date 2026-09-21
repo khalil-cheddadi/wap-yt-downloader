@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { estimateSize, getFormatLabel, formatFileSize, FormatType } from "./converter";
+import { estimateSize, getFormatLabel, formatFileSize, FormatType } from "../src/converter";
 
 describe("estimateSize", () => {
   it("calculates size for 3gp_360p and 3gp_480p", () => {
@@ -41,7 +41,7 @@ describe("getFormatLabel", () => {
 
 describe("purgeTempDir", () => {
   it("purges expired files while keeping fresh files", async () => {
-    const { purgeTempDir } = await import("./converter");
+    const { purgeTempDir } = await import("../src/converter");
     const { join } = await import("path");
     const { writeFileSync, existsSync, utimesSync, unlinkSync } = await import("fs");
 
@@ -69,7 +69,7 @@ describe("purgeTempDir", () => {
   });
 
   it("purges stale partial files (.part, .ytdl, .tmp)", async () => {
-    const { purgeTempDir } = await import("./converter");
+    const { purgeTempDir } = await import("../src/converter");
     const { join } = await import("path");
     const { writeFileSync, existsSync, utimesSync, unlinkSync } = await import("fs");
 
